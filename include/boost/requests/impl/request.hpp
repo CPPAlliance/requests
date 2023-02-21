@@ -11,7 +11,6 @@
 #include <boost/requests/http.hpp>
 #include <boost/requests/service.hpp>
 #include <boost/requests/session.hpp>
-#include <boost/asio/yield.hpp>
 
 namespace boost
 {
@@ -72,15 +71,15 @@ struct async_request_op : asio::coroutine
                    system::error_code & ec,
                    variant2::variant<std::size_t, stream> s)
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
-      yield conn.async_ropen(method, target,
+      BOOST_ASIO_CORO_YIELD conn.async_ropen(method, target,
                              std::forward<RequestBody>(request_body),
                              std::move(req), std::move(self));
       str_.emplace(std::move(variant2::get<1>(s)));
       if (!ec)
       {
-        yield str_->async_read( rb.buffer, std::move(self));
+        BOOST_ASIO_CORO_YIELD str_->async_read( rb.buffer, std::move(self));
       }
 
       rb.headers = std::move(*str_).headers();
@@ -168,6 +167,5 @@ async_request(beast::http::verb method,
 }
 }
 
-#include <boost/asio/unyield.hpp>
 
 #endif // BOOST_REQUESTS_REQUEST_HPP

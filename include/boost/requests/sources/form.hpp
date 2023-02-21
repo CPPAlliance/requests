@@ -6,17 +6,20 @@
 #define BOOST_REQUESTS_SOURCES_FORM_HPP
 
 #include <boost/requests/source.hpp>
+#include <boost/requests/form.hpp>
 #include <boost/beast/core/file.hpp>
-
-#if defined(__cpp_lib_filesystem)
-#include <filesystem>
-#endif
-
 
 namespace boost
 {
 namespace requests
 {
+namespace detail
+{
+
+BOOST_REQUESTS_DECL
+std::array<char, 62> make_boundary_value();
+
+}
 
 struct form_source : source
 {
@@ -58,20 +61,47 @@ struct form_source : source
   core::string_view default_content_type() override { return "application/x-www-form-urlencoded"; }
 };
 
-inline form_source tag_invoke(const make_source_tag&, urls::params_encoded_view pev)
+struct multi_part_form_source final : source
 {
-  return form_source(pev);
+  std::array<char, 62> boundary_and_type{detail::make_boundary_value()};
+  multi_part_form mpf;
+  typename std::vector<multi_part_form::form_data>::const_iterator current = mpf.storage.cbegin();
+
+  boost::optional<asio::coroutine> coro_state;
+  std::size_t remaining = 0;
+
+  BOOST_REQUESTS_DECL
+  ~multi_part_form_source();
+  BOOST_REQUESTS_DECL
+  multi_part_form_source(const multi_part_form_source & rhs);
+
+  BOOST_REQUESTS_DECL
+  multi_part_form_source(multi_part_form && mpf);
+  BOOST_REQUESTS_DECL
+  multi_part_form_source(const multi_part_form & mpf);
+
+  BOOST_REQUESTS_DECL
+  optional<std::size_t> size() const override;
+  BOOST_REQUESTS_DECL
+  void reset() override;
+  BOOST_REQUESTS_DECL
+  std::pair<std::size_t, bool> read_some(void * data, std::size_t size, system::error_code & ec) override;
+  BOOST_REQUESTS_DECL
+  core::string_view default_content_type() override;
+};
+
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, form form_, container::pmr::memory_resource * res);
+
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, multi_part_form mpf, container::pmr::memory_resource * res);
+
 
 }
-
-template<typename Form>
-inline auto tag_invoke(const make_source_tag&, Form && f)
-    -> std::enable_if_t<std::is_same<std::decay_t<Form>, form>::value, form_source>
-{
-  return form_source(std::forward<Form>(f));
 }
 
-}
-}
+#if defined(BOOST_REQUESTS_HEADER_ONLY)
+#include <boost/requests/sources/impl/form.ipp>
+#endif
 
 #endif //BOOST_REQUESTS_SOURCES_FILE_HPP

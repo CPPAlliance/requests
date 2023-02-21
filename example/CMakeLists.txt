@@ -16,8 +16,8 @@ foreach(SRC ${ALL_EXAMPLES})
 
     target_link_libraries(boost_requests_example_${NAME} PUBLIC
                           OpenSSL::Crypto OpenSSL::SSL
-                          Boost::requests Boost::json
-                          Boost::filesystem Boost::system
-                          Boost::url pugixml::static)
+                          Boost::requests
+                          Boost::filesystem
+                          pugixml::static)
     target_compile_definitions(boost_requests_example_${NAME} PUBLIC BOOST_REQUESTS_SEPARATE_COMPILATION=1 BOOST_FILESYSTEM_NO_DEPRECATED=1)
 endforeach()

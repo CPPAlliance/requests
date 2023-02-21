@@ -75,7 +75,6 @@ template<typename T>
 inline auto interpret_result(const T raw)
     -> system::result<std::chrono::system_clock::time_point>
 {
-  std::chrono::system_clock::time_point ts{};
   const std::size_t wd = std::get<0>(raw).index();
   const auto d1 = std::get<1>(raw);
   const auto t1 = std::get<2>(raw);

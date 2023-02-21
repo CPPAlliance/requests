@@ -12,9 +12,9 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 
-#include <boost/requests/method.hpp>
 #include <boost/requests/json.hpp>
-#include <boost/requests/request_settings.hpp>
+#include <boost/requests/method.hpp>
+#include <boost/requests/request_parameters.hpp>
 
 #include <pugixml.hpp>
 #include <iostream>
@@ -62,9 +62,12 @@ struct xml_ref_source final : requests::source
 namespace pugi
 {
 
-xml_ref_source tag_invoke(const requests::make_source_tag&, const pugi::xml_document &doc)
+requests::source_ptr tag_invoke(const requests::make_source_tag&, const pugi::xml_document &doc,
+                          container::pmr::memory_resource * res)
 {
-  return xml_ref_source{std::move(doc)};
+  return std::allocate_shared<xml_ref_source>(
+            container::pmr::polymorphic_allocator<void>(res),
+            std::move(doc));
 }
 
 

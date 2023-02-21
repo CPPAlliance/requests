@@ -57,22 +57,25 @@ void http_request_connection_pool(bool https)
   hc.lookup(url);
   CHECK(https == hc.uses_ssl());
 
-  // SUBCASE("headers")
+
+  // headers
   {
-    auto hdr = request(hc, requests::http::verb::get, urls::url_view( urls::url_view("/headers")),
-                           requests::empty{},
-                           {requests::headers({{"Test-Header", "it works"}}), {false}});
+    auto hdr = request(hc, requests::http::verb::get, urls::url_view("/headers"),
+                       requests::empty{},
+                       {requests::headers({{"Test-Header", "it works"}}), {false}});
 
     auto hd = as_json(hdr).at("headers");
-
-    CHECK(hd.at("Host")        == json::value(url.authority().buffer()));
+    CHECK_HTTP_RESULT(hdr.headers);
+    CHECK(hd.at("Host")        == json::value(url.encoded_host()));
     CHECK(hd.at("Test-Header") == json::value("it works"));
   }
 
-  // SUBCASE("stream")
+  // stream
   {
-    auto str = hc.ropen(requests::http::verb::get,  urls::url_view( urls::url_view("/get")), requests::empty{}, {requests::headers({{"Test-Header", "it works"}}), {false}});
+    auto str = hc.ropen(requests::http::verb::get, urls::url_view("/get"),
+                        requests::empty{}, {requests::headers({{"Test-Header", "it works"}}), {false}});
 
+    CHECK_HTTP_RESULT(str.headers());
     json::stream_parser sp;
 
     char buf[32];
@@ -87,118 +90,153 @@ void http_request_connection_pool(bool https)
     }
 
     auto hd = sp.release().at("headers");
-
-    CHECK(hd.at("Host")        == json::value(url.authority().buffer()));
+    CHECK(hd.at("Host")        == json::value(url.encoded_host()));
     CHECK(hd.at("Test-Header") == json::value("it works"));
   }
 
-  // SUBCASE("stream-dump")
+
+  // stream-all
   {
-    auto str = hc.ropen(requests::http::verb::get,  urls::url_view( urls::url_view("/get")),
+    auto str = hc.ropen(requests::http::verb::get, urls::url_view("/get"),
                         requests::empty{}, {requests::headers({{"Test-Header", "it works"}}), {false}});
+
+    CHECK_HTTP_RESULT(str.headers());
+    std::string buf;
+    auto bb = asio::dynamic_buffer(buf);
+
+    error_code ec;
+    CHECK(str.read(bb, ec) > 0u);
+
+    CHECK(ec == error_code{});
+
+    auto val = json::parse(buf);
+
+    auto hd = val.at("headers");
+    CHECK(hd.at("Host")        == json::value(url.encoded_host()));
+    CHECK(hd.at("Test-Header") == json::value("it works"));
+  }
+
+
+  // stream-dump
+  {
+    auto str = hc.ropen(requests::http::verb::get, urls::url_view("/get"),
+                        requests::empty{}, {requests::headers({{"Test-Header", "it works"}}), {false}});
+    CHECK_HTTP_RESULT(str.headers());
     str.dump();
   }
 
-
-  // SUBCASE("get")
+  // get
   {
-    auto hdr = get(hc,  urls::url_view( urls::url_view("/get")), {requests::headers({{"Test-Header", "it works"}}), {false}});
+    auto hdr = get(hc, urls::url_view("/get"), {requests::headers({{"Test-Header", "it works"}}), {false}});
 
     auto hd = as_json(hdr).at("headers");
+    CHECK_HTTP_RESULT(hdr.headers);
 
-    CHECK(hd.at("Host")        == json::value(url.authority().buffer()));
+    CHECK(hd.at("Host")        == json::value(url.encoded_host()));
     CHECK(hd.at("Test-Header") == json::value("it works"));
   }
 
-  // SUBCASE("get-redirect")
+  // get-redirect
   {
-    auto hdr = get(hc,  urls::url_view("/redirect-to?url=%2Fget"), {requests::headers({{"Test-Header", "it works"}}), {false}});
+    auto hdr = get(hc, urls::url_view("/redirect-to?url=%2Fget"),
+                   {requests::headers({{"Test-Header", "it works"}}), {false}});
 
+    CHECK_HTTP_RESULT(hdr.headers);
     CHECK(hdr.history.size() == 1u);
     CHECK(hdr.history.at(0u).at(requests::http::field::location) == "/get");
 
     auto hd = as_json(hdr).at("headers");
 
-    CHECK(hd.at("Host")        == json::value(url.authority().buffer()));
+    CHECK(hd.at("Host")        == json::value(url.encoded_host()));
     CHECK(hd.at("Test-Header") == json::value("it works"));
   }
 
-  // SUBCASE("too-many-redirects")
+  // too-many-redirects
   {
     error_code ec;
-    auto res = get(hc,  urls::url_view("/redirect/10"), {{}, {false, requests::redirect_mode::private_domain, 5}}, ec);
+    auto res = get(hc, urls::url_view("/redirect/10"), {{}, {false, requests::redirect_mode::private_domain, 5}}, ec);
+    CHECK_HTTP_RESULT(res.headers);
     CHECK(res.history.size() == 5);
     CHECK(res.headers.begin() == res.headers.end());
     CHECK(ec == requests::error::too_many_redirects);
   }
 
-  // SUBCASE("download")
+  // download
   {
-    const auto target = filesystem::temp_directory_path() / "requests-test.png";
+    error_code ec;
+    const auto tmp = filesystem::temp_directory_path(ec);
+    check_ec(ec);
+    const auto target = tmp / "requests-test.png";
     if (filesystem::exists(target))
       filesystem::remove(target);
 
     CHECK(!filesystem::exists(target));
-    auto res = download(hc,  urls::url_view("/image"), {{}, {false}}, target);
+    CHECK_MESSAGE( filesystem::exists(tmp), tmp);
+    auto res = download(hc, urls::url_view("/image"), {{}, {false}}, target);
+    CHECK_HTTP_RESULT(res.headers);
 
     CHECK(std::stoull(res.headers.at(requests::http::field::content_length)) > 0u);
     CHECK(res.headers.at(requests::http::field::content_type) == "image/png");
 
-    CHECK(filesystem::exists(target));
-    fs_error_code ec;
-    filesystem::remove(target, ec);
+    CHECK_MESSAGE(filesystem::exists(target), target);
+    fs_error_code ec_;
+    filesystem::remove(target, ec_);
   }
 
 
-  // SUBCASE("download-redirect")
+  // download-redirect
   {
     const auto target = filesystem::temp_directory_path() / "requests-test.png";
     if (filesystem::exists(target))
       filesystem::remove(target);
 
     CHECK(!filesystem::exists(target));
-    auto res = download(hc,  urls::url_view("/redirect-to?url=%2Fimage"), {{}, {false}}, target);
-
+    auto res = download(hc, urls::url_view("/redirect-to?url=%2Fimage"), {{}, {false}}, target);
+    CHECK_HTTP_RESULT(res.headers);
     CHECK(res.history.size() == 1u);
     CHECK(res.history.at(0u).at(requests::http::field::location) == "/image");
 
     CHECK(std::stoull(res.headers.at(requests::http::field::content_length)) > 0u);
     CHECK(res.headers.at(requests::http::field::content_type) == "image/png");
 
-    CHECK(filesystem::exists(target));
+    CHECK_MESSAGE(filesystem::exists(target), target);
     fs_error_code ec;
     filesystem::remove(target, ec);
   }
 
 
-  // SUBCASE("download-too-many-redirects")
+  // download-too-many-redirects
   {
     error_code ec;
     const auto target = filesystem::temp_directory_path() / "requests-test.html";
     if (filesystem::exists(target))
       filesystem::remove(target);
     auto res = download(hc,  urls::url_view("/redirect/10"), {{}, {false, requests::redirect_mode::private_domain, 3}}, target, ec);
-    CHECK(res.history.size() == 3);
 
+    CHECK_HTTP_RESULT(res.headers);
+    CHECK(res.history.size() == 3);
     CHECK(res.headers.begin() == res.headers.end());
 
     CHECK(ec == requests::error::too_many_redirects);
     CHECK(!filesystem::exists(target));
   }
 
-   // SUBCASE("delete")
+
+  // delete
   {
-    auto hdr = delete_(hc, urls::url_view("/delete"), json::value{{"test-key", "test-value"}}, {{}, {false}});
+    auto hdr = delete_(hc,  urls::url_view("/delete"), json::value{{"test-key", "test-value"}}, {{}, {false}});
+    CHECK_HTTP_RESULT(hdr.headers);
 
     auto js = as_json(hdr);
-    CHECK(requests::http::to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
+    CHECK(to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
     CHECK(js.at("headers").at("Content-Type") == "application/json");
   }
 
-  // SUBCASE("patch-json")
+  // patch-json
   {
     json::value msg {{"test-key", "test-value"}};
-    auto hdr = patch(hc,  urls::url_view("/patch"), msg, {{}, {false}});
+    auto hdr = patch(hc, urls::url_view("/patch"), msg, {{}, {false}});
+    CHECK_HTTP_RESULT(hdr.headers);
 
     auto js = as_json(hdr);
     CHECK(hdr.headers.result() == requests::http::status::ok);
@@ -206,11 +244,12 @@ void http_request_connection_pool(bool https)
     CHECK(js.at("json") == msg);
   }
 
-  // SUBCASE("patch-form")
+  // patch-form
   {
-    auto hdr = patch(hc,  urls::url_view("/patch"),
-                        requests::form{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}},
-                        {{}, {false}});
+    auto hdr = patch(hc, urls::url_view("/patch"),
+                     requests::form{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}},
+                     {{}, {false}});
+    CHECK_HTTP_RESULT(hdr.headers);
 
     auto js = as_json(hdr);
     CHECK(hdr.headers.result() == requests::http::status::ok);
@@ -218,10 +257,11 @@ void http_request_connection_pool(bool https)
     CHECK(js.at("form") == json::value{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}});
   }
 
-  // SUBCASE("put-json")
+  // put-json
   {
     json::value msg {{"test-key", "test-value"}};
-    auto hdr = put(hc,  urls::url_view("/put"), msg, {{}, {false}});
+    auto hdr = put(hc, urls::url_view("/put"), msg, {{}, {false}});
+    CHECK_HTTP_RESULT(hdr.headers);
 
     auto js = as_json(hdr);
     CHECK(hdr.headers.result() == requests::http::status::ok);
@@ -229,22 +269,24 @@ void http_request_connection_pool(bool https)
     CHECK(js.at("json") == msg);
   }
 
-  // SUBCASE("put-form")
+  // put-form
   {
-    auto hdr = put(hc,  urls::url_view("/put"),
-                        requests::form{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}},
-                        {{}, {false}});
+    auto hdr = put(hc, urls::url_view("/put"),
+                   requests::form{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}},
+                   {{}, {false}});
+    CHECK_HTTP_RESULT(hdr.headers);
 
     auto js = as_json(hdr);
     CHECK(hdr.headers.result() == requests::http::status::ok);
     CHECK(js.at("headers").at("Content-Type") == "application/x-www-form-urlencoded");
     CHECK(js.at("form") == json::value{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}});
   }
-  
-  // SUBCASE("post-json")
+
+  // post-json
   {
     json::value msg {{"test-key", "test-value"}};
     auto hdr = post(hc, urls::url_view("/post"), msg, {{}, {false}});
+    CHECK_HTTP_RESULT(hdr.headers);
 
     auto js = as_json(hdr);
     CHECK(hdr.headers.result() == requests::http::status::ok);
@@ -252,11 +294,12 @@ void http_request_connection_pool(bool https)
     CHECK(js.at("json") == msg);
   }
 
-  // SUBCASE("post-form")
+  // post-form
   {
     auto hdr = post(hc, urls::url_view("/post"),
-                      requests::form{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}},
-                      {{}, {false}});
+                    requests::form{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}},
+                    {{}, {false}});
+    CHECK_HTTP_RESULT(hdr.headers);
 
     auto js = as_json(hdr);
     CHECK(hdr.headers.result() == requests::http::status::ok);
@@ -281,6 +324,8 @@ void run_tests(error_code ec,
   namespace filesystem = requests::filesystem;
 
   check_ec(ec);
+
+  // headers
   async_request(
       conn,
       http::verb::get, urls::url_view("/headers"),
@@ -288,64 +333,60 @@ void run_tests(error_code ec,
       tracker(
           [url](error_code ec, requests::response hdr)
           {
-            // SUBCASE("headers")
-            {
-
-              check_ec(ec);
-              auto hd = as_json(hdr).at("headers");
-
-              CHECK(hd.at("Host")        == json::value(url.host_name()));
-              CHECK(hd.at("Test-Header") == json::value("it works"));
-            }
+            check_ec(ec);
+            auto hd = as_json(hdr).at("headers");
+            CHECK_HTTP_RESULT(hdr.headers);
+            CHECK(hd.at("Host")        == json::value(url.host_name()));
+            CHECK(hd.at("Test-Header") == json::value("it works"));
           }));
 
+  // headers
   async_get(conn,
             urls::url_view("/get"),
             {requests::headers({{"Test-Header", "it works"}}), {false}},
             tracker(
                 [url](error_code ec, requests::response hdr)
                 {
-                  // SUBCASE("headers")
-                  {
-                    check_ec(ec);
-                    auto hd = as_json(hdr).at("headers");
+                  check_ec(ec);
+                  auto hd = as_json(hdr).at("headers");
+                  CHECK_HTTP_RESULT(hdr.headers);
+                  CHECK(hd.at("Host")        == json::value(url.host_name()));
+                  CHECK(hd.at("Test-Header") == json::value("it works"));
 
-                    CHECK(hd.at("Host")        == json::value(url.host_name()));
-                    CHECK(hd.at("Test-Header") == json::value("it works"));
-                  }
                 }));
 
+  // get-redirect
   async_get(conn, urls::url_view("/redirect-to?url=%2Fget"),
             {requests::headers({{"Test-Header", "it works"}}), {false}},
             tracker(
                 [url](error_code ec, requests::response hdr)
                 {
-                  // SUBCASE("get-redirect")
                   {
                     CHECK(hdr.history.size() == 1u);
                     CHECK(hdr.history.at(0u).at(requests::http::field::location) == "/get");
+                    CHECK_HTTP_RESULT(hdr.headers);
 
                     auto hd = as_json(hdr).at("headers");
-
                     CHECK(hd.at("Host")        == json::value(url.host_name()));
                     CHECK(hd.at("Test-Header") == json::value("it works"));
                   }
                 }));
 
+  // too-many-redirects
   async_get(conn, urls::url_view("/redirect/10"),
             {{}, {false, requests::redirect_mode::private_domain, 5}},
             tracker(
                 [url](error_code ec, requests::response res)
                 {
-                  // SUBCASE("too-many-redirects")
-                  {
-                    CHECK(res.history.size() == 5);
-                    CHECK(res.headers.begin() == res.headers.end());
-                    CHECK(ec == requests::error::too_many_redirects);
-                  }
+                  CHECK_HTTP_RESULT(res.headers);
+
+                  CHECK(res.history.size() == 5);
+                  CHECK(res.headers.begin() == res.headers.end());
+                  CHECK(ec == requests::error::too_many_redirects);
+
                 }));
 
-  {
+  {  // download
     auto pt = filesystem::temp_directory_path();
     const auto target = pt / "requests-test.png";
     if (filesystem::exists(target))
@@ -356,15 +397,13 @@ void run_tests(error_code ec,
                    tracker(
                        [url, target](error_code ec, requests::response_base res)
                        {
-                         // SUBCASE("download")
-                         {
-                           CHECK(std::stoull(res.headers.at(requests::http::field::content_length)) > 0u);
-                           CHECK(res.headers.at(requests::http::field::content_type) == "image/png");
+                         CHECK(std::stoull(res.headers.at(requests::http::field::content_length)) > 0u);
+                         CHECK(res.headers.at(requests::http::field::content_type) == "image/png");
+                         CHECK_HTTP_RESULT(res.headers);
 
-                           CHECK(filesystem::exists(target));
-                           fs_error_code ec_;
-                           filesystem::remove(target, ec_);
-                         }
+                         CHECK_MESSAGE(filesystem::exists(target), target);
+                         fs_error_code ec_;
+                         filesystem::remove(target, ec_);
                        }));
   }
 
@@ -374,126 +413,115 @@ void run_tests(error_code ec,
       filesystem::remove(target);
 
     CHECK(!filesystem::exists(target));
+    // download-redirect
     async_download(conn, urls::url_view("/redirect-to?url=%2Fimage"), {{}, {false}}, target,
                    tracker(
                        [url, target](error_code ec, requests::response_base res)
                        {
-                         // SUBCASE("download-redirect")
-                         {
-                           CHECK(res.history.size() == 1u);
-                           CHECK(res.history.at(0u).at(requests::http::field::location) == "/image");
+                         CHECK(res.history.size() == 1u);
+                         CHECK(res.history.at(0u).at(requests::http::field::location) == "/image");
+                         CHECK_HTTP_RESULT(res.headers);
 
-                           CHECK(std::stoull(res.headers.at(requests::http::field::content_length)) > 0u);
-                           CHECK(res.headers.at(requests::http::field::content_type) == "image/png");
+                         CHECK(std::stoull(res.headers.at(requests::http::field::content_length)) > 0u);
+                         CHECK(res.headers.at(requests::http::field::content_type) == "image/png");
 
-                           CHECK(filesystem::exists(target));
-                           fs_error_code ec_;
-                           filesystem::remove(target, ec_);
-                         }
+                         CHECK_MESSAGE(filesystem::exists(target), target);
+                         fs_error_code ec_;
+                         filesystem::remove(target, ec_);
                        }));
 
   }
 
+  // delete
   async_delete(conn,  urls::url_view("/delete"), json::value{{"test-key", "test-value"}}, {{}, {false}},
                tracker(
                    [url](error_code ec, requests::response hdr)
                    {
-                     // SUBCASE("delete")
-                     {
-                       auto js = as_json(hdr);
-                       CHECK(requests::http::to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
-                       CHECK(js.at("headers").at("Content-Type") == "application/json");
-                     }
+                     CHECK_HTTP_RESULT(hdr.headers);
+                     auto js = as_json(hdr);
+                     CHECK(requests::http::to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
+                     CHECK(js.at("headers").at("Content-Type") == "application/json");
                    }));
 
 
+  // patch-json
   async_patch(conn, urls::url_view("/patch"), json::value{{"test-key", "test-value"}}, {{}, {false}},
               tracker(
                   [url](error_code ec, requests::response hdr)
                   {
-                    // SUBCASE("patch-json")
-                    {
-                      auto js = as_json(hdr);
-                      CHECK(requests::http::to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
-                      CHECK(js.at("headers").at("Content-Type") == "application/json");
-                    }
+                    CHECK_HTTP_RESULT(hdr.headers);
+                    auto js = as_json(hdr);
+                    CHECK(requests::http::to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
+                    CHECK(js.at("headers").at("Content-Type") == "application/json");
                   }));
 
-
-
+  // patch-form
   async_patch(conn, urls::url_view("/patch"),
               requests::form{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}},
               {{}, {false}},
               tracker(
                   [url](error_code ec, requests::response hdr)
                   {
-                    // SUBCASE("patch-form")
-                    {
-                      auto js = as_json(hdr);
-                      CHECK(hdr.headers.result() == requests::http::status::ok);
-                      CHECK(js.at("headers").at("Content-Type") == "application/x-www-form-urlencoded");
-                      CHECK(js.at("form") == json::value{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}});
-                    }
+                    CHECK_HTTP_RESULT(hdr.headers);
+
+                    auto js = as_json(hdr);
+                    CHECK(hdr.headers.result() == requests::http::status::ok);
+                    CHECK(js.at("headers").at("Content-Type") == "application/x-www-form-urlencoded");
+                    CHECK(js.at("form") == json::value{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}});
+
                   }));
 
-
+  // put-json
   async_put(conn, urls::url_view("/put"), json::value{{"test-key", "test-value"}}, {{}, {false}},
             tracker(
                 [url](error_code ec, requests::response hdr)
                 {
-                  // SUBCASE("put-json")
-                  {
-                    auto js = as_json(hdr);
-                    CHECK(requests::http::to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
-                    CHECK(js.at("headers").at("Content-Type") == "application/json");
-                  }
+                  CHECK_HTTP_RESULT(hdr.headers);
+                  auto js = as_json(hdr);
+                  CHECK(requests::http::to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
+                  CHECK(js.at("headers").at("Content-Type") == "application/json");
                 }));
 
-
-
+  // put-form
   async_put(conn, urls::url_view("/put"),
             requests::form{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}},
             {{}, {false}},
             tracker(
                 [url](error_code ec, requests::response hdr)
                 {
-                  // SUBCASE("put-form")
-                  {
-                    auto js = as_json(hdr);
-                    CHECK(hdr.headers.result() == requests::http::status::ok);
-                    CHECK(js.at("headers").at("Content-Type") == "application/x-www-form-urlencoded");
-                    CHECK(js.at("form") == json::value{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}});
-                  }
+                  CHECK_HTTP_RESULT(hdr.headers);
+
+                  auto js = as_json(hdr);
+                  CHECK(hdr.headers.result() == requests::http::status::ok);
+                  CHECK(js.at("headers").at("Content-Type") == "application/x-www-form-urlencoded");
+                  CHECK(js.at("form") == json::value{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}});
+
                 }));
 
-
+  // post-json
   async_post(conn, urls::url_view("/post"), json::value{{"test-key", "test-value"}}, {{}, {false}},
              tracker(
                  [url](error_code ec, requests::response hdr)
                  {
-                   // SUBCASE("post-json")
-                   {
-                     auto js = as_json(hdr);
-                     CHECK(requests::http::to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
-                     CHECK(js.at("headers").at("Content-Type") == "application/json");
-                   }
+                   CHECK_HTTP_RESULT(hdr.headers);
+                   auto js = as_json(hdr);
+                   CHECK(requests::http::to_status_class(hdr.headers.result()) == requests::http::status_class::successful);
+                   CHECK(js.at("headers").at("Content-Type") == "application/json");
                  }));
 
 
-
+  // post-form
   async_post(conn, urls::url_view("/post"),
              requests::form{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}},
              {{}, {false}},
              tracker(
                  [url](error_code ec, requests::response hdr)
                  {
-                   // SUBCASE("post-form")
-                   {
-                     auto js = as_json(hdr);
-                     CHECK(hdr.headers.result() == requests::http::status::ok);
-                     CHECK(js.at("headers").at("Content-Type") == "application/x-www-form-urlencoded");
-                     CHECK(js.at("form") == json::value{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}});
-                   }
+                   CHECK_HTTP_RESULT(hdr.headers);
+                   auto js = as_json(hdr);
+                   CHECK(hdr.headers.result() == requests::http::status::ok);
+                   CHECK(js.at("headers").at("Content-Type") == "application/x-www-form-urlencoded");
+                   CHECK(js.at("form") == json::value{{"foo", "42"}, {"bar", "21"}, {"foo bar" , "23"}});
                  }));
 }
 

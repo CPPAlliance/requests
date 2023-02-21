@@ -28,8 +28,7 @@ def main(ctx):
   linux_cxx("clang 3.8", "clang++-3.8", packages="clang-3.8", buildtype="boost", buildscript="drone", image="cppalliance/droneubuntu1604:1", environment={ "BOOST_REQUEST_HTTPBIN": "httpbin.cpp.al", 'B2_TOOLSET': 'clang', 'COMPILER': 'clang++-3.8', 'B2_CXXSTD': '14', 'DRONE_JOB_UUID': '7b52009b64'}, globalenv=globalenv),
   osx_cxx("clang", "g++", packages="", buildtype="boost",         buildscript="drone", environment={ "BOOST_REQUEST_HTTPBIN": "httpbin.cpp.al", 'B2_TOOLSET': 'clang', 'B2_CXXSTD': '14,17', 'DRONE_JOB_UUID': '91032ad7bb'}, globalenv=globalenv),
   linux_cxx("coverity", "g++", packages="", buildtype="coverity", buildscript="drone", image=linuxglobalimage, environment={ "BOOST_REQUEST_HTTPBIN": "httpbin.cpp.al", 'COMMENT': 'Coverity Scan', 'B2_TOOLSET': 'clang', 'DRONE_JOB_UUID': '472b07b9fc'}, globalenv=globalenv),
-  windows_cxx("msvc-14.1", "", image="cppalliance/dronevs2017",   buildtype="boost", buildscript="drone", environment={ "BOOST_REQUEST_HTTPBIN": "httpbin.cpp.al", "VARIANT": "release", "TOOLSET": "msvc-14.1", "CXXSTD": "14", "DEFINE" : "BOOST_BEAST_USE_STD_STRING_VIEW", "ADDRESS_MODEL": "64"}),
-  windows_cxx("msvc-14.3", "", image="cppalliance/dronevs2022:1", buildtype="boost", buildscript="drone", environment={ "BOOST_REQUEST_HTTPBIN": "httpbin.cpp.al", "VARIANT": "release", "TOOLSET": "msvc-14.3", "CXXSTD": "14", "DEFINE" : "BOOST_BEAST_USE_STD_STRING_VIEW", "ADDRESS_MODEL": "64"}),
+  windows_cxx("msvc-14.3", "", image="cppalliance/dronevs2022:1", buildtype="boost", buildscript="drone", environment={ "BOOST_REQUEST_HTTPBIN": "httpbin.cpp.al", "VARIANT": "release", "TOOLSET": "msvc-14.3", "CXXSTD": "17", "ADDRESS_MODEL": "64"}),
     ]
 
 # from https://github.com/boostorg/boost-ci

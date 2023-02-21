@@ -10,7 +10,6 @@
 
 #include <boost/asio.hpp>
 #include <boost/asio/compose.hpp>
-#include <boost/asio/yield.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
 
 #include <thread>
@@ -70,12 +69,12 @@ struct basic_main
     void resume(requests::detail::faux_token_t<step_signature_type> self,
                     error_code & ec, lock_guard l = {})
     {
-      reenter(this)
+      BOOST_ASIO_CORO_REENTER(this)
       {
-        yield mtx.async_lock(std::move(self));
+        BOOST_ASIO_CORO_YIELD mtx.async_lock(std::move(self));
         v.push_back(i);
         tim = std::make_unique<asio::steady_timer>(mtx.get_executor(), std::chrono::milliseconds(10));
-        yield tim->async_wait(std::move(self));
+        BOOST_ASIO_CORO_YIELD tim->async_wait(std::move(self));
         v.push_back(i + 1);
       }
     }
@@ -292,6 +291,55 @@ TEST_CASE("cancel_lock")
 
   CHECK(4u == std::count(ip.ecs.begin(), ip.ecs.end(), asio::error::operation_aborted));
 }
+
+
+TEST_CASE("cancel_one")
+{
+  asio::io_context ctx;
+
+  using token_type = boost::requests::detail::faux_token_t<void(boost::system::error_code)>;
+  struct impl final : token_type::base
+  {
+    std::vector<error_code> ecs;
+
+    using allocator_type = container::pmr::polymorphic_allocator<void>;
+    allocator_type get_allocator() override
+    {
+      return container::pmr::polymorphic_allocator<void>{container::pmr::get_default_resource()};
+    }
+
+    void resume(boost::requests::detail::faux_token_t<void(error_code)> tk, error_code ec) override
+    {
+      ecs.push_back(ec);
+    }
+  };
+  impl ip{};
+  std::shared_ptr<token_type::base> ptr{&ip, [](impl * ) {}};
+  asio::cancellation_signal sig;
+  ip.slot = sig.slot();
+  {
+
+
+    mutex mtx{ctx};
+    mtx.lock();
+    mtx.async_lock(token_type{ptr});
+    mtx.async_lock(token_type{ptr});
+    ctx.run_for(std::chrono::milliseconds(10));
+    CHECK(ip.ecs.empty());
+
+    sig.emit(asio::cancellation_type::all);
+    ctx.restart();
+    ctx.run_for(std::chrono::milliseconds(10));
+
+    REQUIRE(ip.ecs.size() == 1u);
+    CHECK(ip.ecs.front() == asio::error::operation_aborted);
+  }
+
+  ctx.restart();
+  ctx.run_for(std::chrono::milliseconds(10));
+  CHECK(ip.ecs.size() == 2u);
+}
+
 
 
 TEST_SUITE_END();

@@ -13,9 +13,9 @@
 //
 
 #include <boost/requests/download.hpp>
-#include <boost/requests/method.hpp>
 #include <boost/requests/json.hpp>
-#include <boost/requests/request_settings.hpp>
+#include <boost/requests/method.hpp>
+#include <boost/requests/request_parameters.hpp>
 #include <boost/requests/service.hpp>
 
 #include <iostream>

@@ -26,11 +26,11 @@ quoted_string_t::parse(
   namespace ug = boost::urls::grammar;
 
   if (it == end)
-    return urls::grammar::error::need_more;
+    BOOST_REQUESTS_RETURN_EC(urls::grammar::error::need_more);
   const auto it0 = it;
 
   if (*it != '"')
-    return urls::grammar::error::mismatch;
+    BOOST_REQUESTS_RETURN_EC(urls::grammar::error::mismatch);
   it++;
   while (it != end && *it != '"')
   {
@@ -41,7 +41,7 @@ quoted_string_t::parse(
   }
 
   if (*it != '"')
-    return urls::grammar::error::mismatch;
+    BOOST_REQUESTS_RETURN_EC(urls::grammar::error::mismatch);
 
   return value_type(it0, ++it);
 }

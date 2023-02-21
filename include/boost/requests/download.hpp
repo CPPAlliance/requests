@@ -8,11 +8,11 @@
 #ifndef BOOST_REQUESTS_DOWNLOAD_HPP
 #define BOOST_REQUESTS_DOWNLOAD_HPP
 
-#include <boost/asio/buffer.hpp>
 #include <boost/requests/detail/config.hpp>
 #include <boost/requests/detail/faux_coroutine.hpp>
 #include <boost/requests/http.hpp>
 #include <boost/requests/service.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/url/url_view.hpp>
 
 #if defined(BOOST_ASIO_HAS_FILE)
@@ -21,7 +21,6 @@
 #include <boost/beast/core/file.hpp>
 #endif
 
-#include <boost/asio/yield.hpp>
 
 namespace boost
 {
@@ -93,7 +92,7 @@ struct async_write_to_file_op : asio::coroutine
   std::size_t resume(requests::detail::faux_token_t<step_signature_type> self,
                      system::error_code & ec, std::size_t n = 0u)
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
       f.open(file.string().c_str(), asio::file_base::write_only | asio::file_base::create, ec);
       if (ec)
@@ -102,7 +101,7 @@ struct async_write_to_file_op : asio::coroutine
       while (!str.done() && !ec)
       {
         // KDM: this could be in parallel to write using parallel_group.
-        yield {
+        BOOST_ASIO_CORO_YIELD {
           auto b = asio::buffer(buffer);
           str.async_read_some(b, std::move(self));
         }
@@ -111,7 +110,7 @@ struct async_write_to_file_op : asio::coroutine
           return written;
 
         ec_read = exchange(ec, {});
-        yield asio::async_write(f, asio::buffer(buffer, n), std::move(self));
+        BOOST_ASIO_CORO_YIELD asio::async_write(f, asio::buffer(buffer, n), std::move(self));
 
         written += n;
         if (ec_read && !ec)
@@ -183,15 +182,15 @@ struct async_write_to_file_op : asio::coroutine
   std::size_t resume(requests::detail::faux_token_t<step_signature_type> self,
                      system::error_code & ec, std::size_t n = 0u)
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
       f.open(file.string().c_str(), beast::file_mode::write_new, ec);
       if (ec)
         return 0u;
 
-      while (!str.done() && !ec)
+      while (!ec && !str.done())
       {
-        yield str.async_read_some(asio::buffer(buffer), std::move(self));
+        BOOST_ASIO_CORO_YIELD str.async_read_some(asio::buffer(buffer), std::move(self));
 
         if (n == 0 && ec)
           return written;
@@ -262,9 +261,9 @@ inline auto download(Connection & conn,
   if (ec)
     return download_response{std::move(ro).headers(), std::move(ro).history(), {}};
 
-  if (filesystem::exists(download_path, ec) && filesystem::is_directory(download_path) && !target.empty())
+  if (filesystem::exists(download_path, ec) && filesystem::is_directory(download_path, ec) && !target.empty())
     download_path /= target.segments().back(); // so we can download to a folder
-
+  ec.clear();
   if (!ec)
     write_to_file(ro, download_path, ec);
   return download_response{std::move(ro).headers(), std::move(ro).history(), std::move(download_path)};
@@ -331,9 +330,9 @@ struct async_download_op : asio::coroutine
                           system::error_code & ec,
                           optional<stream> s = none)
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
-      yield conn.async_ropen(http::verb::get, target, empty{}, std::move(req), std::move(self));
+      BOOST_ASIO_CORO_YIELD conn.async_ropen(http::verb::get, target, empty{}, std::move(req), std::move(self));
       if (ec)
       {
         rb.history = std::move(*s).history();
@@ -345,10 +344,10 @@ struct async_download_op : asio::coroutine
         rb.download_path = download_path / target.segments().back(); // so we can download to a folder
       else
         rb.download_path = std::move(download_path);
-
+      ec.clear();
       if (!ec)
       {
-        yield async_write_to_file(*str_, rb.download_path,
+        BOOST_ASIO_CORO_YIELD async_write_to_file(*str_, rb.download_path,
                           asio::deferred([](system::error_code ec, std::size_t){return asio::deferred.values(ec);}))
                 (std::move(self));
       }
@@ -414,6 +413,5 @@ async_download(urls::url_view path,
 }
 }
 
-#include <boost/asio/unyield.hpp>
 
 #endif // BOOST_REQUESTS_DOWNLOAD_HPP

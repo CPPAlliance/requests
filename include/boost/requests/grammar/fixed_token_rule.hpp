@@ -113,7 +113,7 @@ struct fixed_token_rule_2_t
       system::result<value_type>
   {
     const auto it0 = it;
-    if(std::distance(it, end) < MinSize)
+    if (std::distance(it, end) < static_cast<int>(MinSize))
       BOOST_REQUESTS_RETURN_EC(
           urls::grammar::error::need_more);
 

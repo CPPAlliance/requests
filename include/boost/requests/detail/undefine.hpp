@@ -5,5 +5,5 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 
-#undef await
-#undef await_lock
+#undef BOOST_REQUESTS_AWAIT
+#undef BOOST_REQUESTS_AWAIT_LOCK

@@ -12,6 +12,7 @@
 #include <boost/asio/defer.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/thread_pool.hpp>
+#include <boost/core/ignore_unused.hpp>
 #include <boost/container/pmr/monotonic_buffer_resource.hpp>
 #include <condition_variable>
 
@@ -62,6 +63,7 @@ void mutex::lock(system::error_code & ec)
   {
     using allocator_type = container::pmr::polymorphic_allocator<void>;
     container::pmr::memory_resource * resource;
+    asio::any_io_executor executor;
     allocator_type get_allocator() override
     {
       return container::pmr::polymorphic_allocator<void>{resource};
@@ -74,7 +76,7 @@ void mutex::lock(system::error_code & ec)
       var.notify_all();
     }
 
-    impl(container::pmr::memory_resource * res ) : resource(res) {}
+    impl(container::pmr::memory_resource * res, asio::any_io_executor executor) : resource(res), executor(executor) {}
     system::error_code ec;
     bool done = false;
     std::condition_variable var;
@@ -88,7 +90,7 @@ void mutex::lock(system::error_code & ec)
   char buf[4096];
   container::pmr::monotonic_buffer_resource res{buf, sizeof(buf)};
 
-  impl ip{&res};
+  impl ip{&res, get_executor()};
 
   std::unique_lock<std::mutex> lock(mtx_);
   std::shared_ptr<token_type::base> ptr{&ip, [](impl * ) {}};
@@ -126,9 +128,9 @@ mutex::~mutex()
   system::error_code ec;
   BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::operation_aborted);
 
-  for (auto & h : waiters_)
+  auto ww = std::move(waiters_);
+  for (auto & h : ww)
   {
-
     h.get_cancellation_slot().clear();
     asio::dispatch(exec_, asio::append(std::move(h), ec));
   }

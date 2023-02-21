@@ -8,7 +8,7 @@
 #ifndef BOOST_REQUESTS_GRAMMAR_TOKEN_RULE_HPP
 #define BOOST_REQUESTS_GRAMMAR_TOKEN_RULE_HPP
 
-#include "boost/requests/detail/config.hpp"
+#include <boost/requests/detail/config.hpp>
 #include <boost/url/grammar/token_rule.hpp>
 
 namespace boost {

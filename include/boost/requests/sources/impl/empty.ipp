@@ -15,13 +15,13 @@ namespace boost
 namespace requests
 {
 
-empty_source& tag_invoke(const make_source_tag&, const empty &)
+source_ptr tag_invoke(const make_source_tag&, const empty &)
 {
-  static empty_source empty_;
+  static source_ptr empty_{std::make_shared<empty_source>()};
   return empty_;
 }
 
-empty_source& tag_invoke(const make_source_tag& tag, const none_t &)
+source_ptr tag_invoke(const make_source_tag& tag, const none_t &)
 {
   return tag_invoke(tag, empty());
 }

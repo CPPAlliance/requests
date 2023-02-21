@@ -6,11 +6,11 @@
 //
 
 // this is on purpose
-#include <boost/requests/connection.hpp>
-
 #ifndef BOOST_REQUESTS_STREAM_HPP
+
 #define BOOST_REQUESTS_STREAM_HPP
 
+#include <boost/requests/detail/connection_impl.hpp>
 #include <boost/requests/detail/lock_guard.hpp>
 #include <boost/asio/execution/bad_executor.hpp>
 #include <boost/beast/http/basic_parser.hpp>
@@ -46,7 +46,7 @@ struct stream
   struct rebind_executor
   {
     /// The socket type when rebound to the specified executor.
-    using other = connection;
+    using other = defaulted<Executor1>;
   };
 
 
@@ -146,12 +146,11 @@ struct stream
 
   bool done() const {return !parser_ ||  parser_->is_done();}
   explicit stream(executor_type executor, std::nullptr_t ) : executor_{executor}, impl_(nullptr) {}
-  explicit stream(executor_type executor,
-                        connection * impl,
-                        detail::tracker t = {})
+  explicit stream(executor_type executor, std::shared_ptr<detail::connection_impl> impl, detail::tracker t = {})
       : executor_{executor},
-        impl_(impl),
-        t_(std::move(t)) {}
+        impl_(std::move(impl)),
+        t_(std::move(t))
+  {}
 
   http::response_header &&headers() &&
   {
@@ -174,7 +173,7 @@ struct stream
   }
  private:
   executor_type executor_;
-  connection* impl_;
+  std::shared_ptr<detail::connection_impl> impl_;
   detail::lock_guard lock_;
 
   std::unique_ptr<http::response_parser<http::buffer_body>,
@@ -187,7 +186,7 @@ struct stream
   struct async_dump_op;
   struct async_read_some_op;
 
-  friend struct connection;
+  friend struct detail::connection_impl;
 };
 
 template <typename Executor1>
@@ -223,7 +222,7 @@ struct stream::defaulted : stream
 
 }
 }
-#include <boost/requests/connection.hpp>
+#include <boost/requests/detail/connection_impl.hpp>
 
 #include <boost/requests/impl/stream.hpp>
 

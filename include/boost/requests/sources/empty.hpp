@@ -41,8 +41,8 @@ struct empty_source : source
   }
 };
 
-BOOST_REQUESTS_DECL empty_source &tag_invoke(const make_source_tag&, const empty &);
-BOOST_REQUESTS_DECL empty_source &tag_invoke(const make_source_tag&, const none_t &);
+BOOST_REQUESTS_DECL source_ptr tag_invoke(const make_source_tag&, const empty &);
+BOOST_REQUESTS_DECL source_ptr tag_invoke(const make_source_tag&, const none_t &);
 
 }
 }

@@ -16,31 +16,16 @@ namespace boost
 namespace requests
 {
 
-file_source::file_source(const boost::filesystem::path & file) : path(file.c_str())
+file_source::file_source(const filesystem::path & file) : path(file.c_str())
 {
   this->file.open(file.string().c_str(), beast::file_mode::read, ec);
 }
 
-file_source tag_invoke(const make_source_tag &tag, const boost::filesystem::path & path)
+source_ptr tag_invoke(const make_source_tag &tag, const filesystem::path & path,
+                      container::pmr::memory_resource * res)
 {
-  return file_source(path);
+  return std::allocate_shared<file_source>(container::pmr::polymorphic_allocator<void>(res), path);
 }
-
-#if defined(__cpp_lib_filesystem)
-
-file_source::file_source(const std::filesystem::path & file) : path(file.c_str())
-{
-  this->file.open(file.string().c_str(), beast::file_mode::read, ec);
-}
-
-file_source tag_invoke(const make_source_tag &tag, const std::filesystem::path & path)
-{
-  return file_source(path);
-}
-
-
-#endif
-
 
 }
 }

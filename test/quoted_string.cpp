@@ -13,22 +13,17 @@
 #include "string_maker.hpp"
 
 
-TEST_SUITE_BEGIN("rfc");
+TEST_SUITE_BEGIN("rfc.quoted_string");
 
 TEST_CASE("quoted_string")
 {
   namespace br = boost::requests;
   namespace ug = boost::urls::grammar;
 
-  CHECK(ug::parse(R"("foobar")", br::rfc::quoted_string) == "\"foobar\"");
-  CHECK(ug::parse(R"(foobar)", br::rfc::quoted_string) == ug::error::mismatch);
-
-  CHECK(ug::parse(R"("foo\"bar")", br::rfc::quoted_string) == "\"foo\\\"bar\"");
-
-  CHECK(
-      br::rfc::unquote_string(ug::parse(R"("foo\"bar")", br::rfc::quoted_string).value())
-        == "foo\"bar");
-
+  CHECK(ug::parse("\"foobar\"", br::rfc::quoted_string) == "\"foobar\"");
+  CHECK(ug::parse("foobar", br::rfc::quoted_string) == ug::error::mismatch);
+  CHECK(ug::parse("\"foo\\\"bar\"", br::rfc::quoted_string) == "\"foo\\\"bar\"");
+  CHECK(br::rfc::unquote_string(ug::parse("\"foo\\\"bar\"", br::rfc::quoted_string).value())== "foo\"bar");
 }
 
 TEST_SUITE_END();

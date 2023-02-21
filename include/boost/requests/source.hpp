@@ -12,6 +12,8 @@
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/optional.hpp>
+#include <boost/json/fwd.hpp>
+
 
 namespace boost
 {
@@ -29,20 +31,34 @@ struct source
 
 struct make_source_tag {};
 
+using source_ptr = std::shared_ptr<source>;
+
+inline auto tag_invoke(const make_source_tag&, source_ptr s)
+{
+  return s;
+}
+
+inline auto tag_invoke(const make_source_tag&, source_ptr s,
+                       container::pmr::memory_resource *)
+{
+  return s;
+}
+
+
 template<typename Source>
-auto make_source(Source && source) -> decltype(tag_invoke(make_source_tag{}, std::declval<Source>()))
+auto make_source(Source && source, container::pmr::memory_resource * = container::pmr::get_default_resource())
+    -> decltype(tag_invoke(make_source_tag{}, std::declval<Source>()))
 {
   return tag_invoke(make_source_tag{}, std::forward<Source>(source));
 }
 
 template<typename Source>
-auto tag_invoke(const make_source_tag&, Source && s)
-    -> std::enable_if_t<
-        std::is_base_of<source, std::decay_t<Source>>::value,
-        Source>
+auto make_source(Source && source, container::pmr::memory_resource * res = container::pmr::get_default_resource())
+    -> decltype(tag_invoke(make_source_tag{}, std::declval<Source>(), res))
 {
-  return std::forward<Source>(s);
+  return tag_invoke(make_source_tag{}, std::forward<Source>(source), res);
 }
+
 
 template<typename Stream>
 std::size_t write_request(
@@ -82,14 +98,42 @@ BOOST_ASIO_INITFN_AUTO_RESULT_TYPE(CompletionToken, void(system::error_code, std
     source &src,
     CompletionToken && token BOOST_ASIO_DEFAULT_COMPLETION_TOKEN(typename Stream::executor_type));
 
+using empty = beast::http::empty_body::value_type;
+
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, asio::const_buffer cb, container::pmr::memory_resource * res);
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(const make_source_tag&, const empty &);
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(const make_source_tag&, const none_t &);
+
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(const make_source_tag&, const filesystem::path & path, container::pmr::memory_resource * res);
+source_ptr tag_invoke(const make_source_tag&,       filesystem::path &&,     container::pmr::memory_resource * res) = delete;
+
+
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, struct form form_, container::pmr::memory_resource * res);
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, struct multi_part_form mpf, container::pmr::memory_resource * res);
+
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, boost::json::value value, container::pmr::memory_resource * res);
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, boost::json::object  obj, container::pmr::memory_resource * res);
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, boost::json::array   arr, container::pmr::memory_resource * res);
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, const boost::json::string & arr,
+                                                            container::pmr::memory_resource * res);
+source_ptr tag_invoke(make_source_tag, boost::json::string  &&str, container::pmr::memory_resource * res) = delete;
+
+
 
 }
 }
 
 #include <boost/requests/impl/source.hpp>
-#include <boost/requests/sources/buffer.hpp>
-#include <boost/requests/sources/empty.hpp>
-#include <boost/requests/sources/file.hpp>
 #include <boost/requests/sources/string.hpp>
 #include <boost/requests/sources/string_view.hpp>
 

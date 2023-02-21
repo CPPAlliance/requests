@@ -9,7 +9,6 @@
 #define BOOST_REQUESTS_IMPL_CONNECTION_POOL_HPP
 
 #include <boost/requests/connection_pool.hpp>
-#include <boost/asio/yield.hpp>
 
 namespace boost {
 namespace requests {
@@ -24,7 +23,7 @@ struct connection_pool::async_lookup_op : asio::coroutine
   const urls::url_view sv;
   optional<asio::ip::tcp::resolver> resolver;
 
-  urls::string_view scheme = this_->use_ssl_ ? "https" : "http";
+  urls::string_view scheme = "https";
   urls::string_view service;
 
   using mutex_type = detail::mutex;
@@ -64,24 +63,24 @@ struct connection_pool::async_get_connection_op : asio::coroutine
 
   using lock_type = detail::lock_guard;
   using conn_t = boost::unordered_multimap<endpoint_type,
-                                           std::shared_ptr<connection>,
+                                           std::shared_ptr<detail::connection_impl>,
                                            detail::endpoint_hash>;
   typename conn_t::iterator itr;
 
 
-  std::shared_ptr<connection> nconn = nullptr;
+  std::shared_ptr<detail::connection_impl> nconn = nullptr;
   lock_type lock;
   endpoint_type ep;
 
-  using completion_signature_type = void(system::error_code, std::shared_ptr<connection>);
+  using completion_signature_type = void(system::error_code, connection);
   using step_signature_type       = void(system::error_code);
 
   BOOST_REQUESTS_DECL auto resume(requests::detail::faux_token_t<step_signature_type> self,
-                                  system::error_code & ec) -> std::shared_ptr<connection>;
+                                  system::error_code & ec) -> connection;
 };
 
-template<BOOST_ASIO_COMPLETION_TOKEN_FOR(void (system::error_code, std::shared_ptr<connection>)) CompletionToken>
-BOOST_ASIO_INITFN_AUTO_RESULT_TYPE(CompletionToken, void (system::error_code, std::shared_ptr<basic_connection<Stream>>))
+template<BOOST_ASIO_COMPLETION_TOKEN_FOR(void (boost::system::error_code, connection)) CompletionToken>
+BOOST_ASIO_INITFN_AUTO_RESULT_TYPE(CompletionToken, void (boost::system::error_code, connection))
 connection_pool::async_get_connection(CompletionToken && completion_token)
 {
   // async_get_connection_op
@@ -104,7 +103,7 @@ struct connection_pool::async_ropen_op : asio::coroutine
   request_options opt;
   cookie_jar * jar;
 
-  std::shared_ptr<connection> conn;
+  connection conn;
 
   async_ropen_op(connection_pool * this_,
                  beast::http::verb method,
@@ -130,13 +129,13 @@ struct connection_pool::async_ropen_op : asio::coroutine
   {
   }
 
-  using completion_signature_type = void(system::error_code, stream);
-  using step_signature_type       = void(system::error_code, variant2::variant<variant2::monostate, std::shared_ptr<connection>, stream>);
+  using completion_signature_type = void(boost::system::error_code, stream);
+  using step_signature_type       = void(boost::system::error_code, variant2::variant<variant2::monostate, connection, stream>);
 
   BOOST_REQUESTS_DECL
   auto resume(requests::detail::faux_token_t<step_signature_type> self,
-              system::error_code & ec,
-              variant2::variant<variant2::monostate, std::shared_ptr<connection>, stream> res = variant2::monostate()) -> stream;
+              boost::system::error_code & ec,
+              variant2::variant<variant2::monostate, connection, stream> res = variant2::monostate()) -> stream;
 };
 
 
@@ -156,33 +155,34 @@ connection_pool::async_ropen(beast::http::verb method,
       this, method, path, std::ref(headers), std::ref(src), std::move(opt), jar);
 }
 
-template<typename RequestSource>
 struct connection_pool::async_ropen_op_body_base
 {
-  RequestSource source_impl;
+  source_ptr source_impl;
   http::fields headers;
 
   template<typename RequestBody>
-  async_ropen_op_body_base(RequestBody && body, http::fields headers)
-      : source_impl(requests::make_source(std::forward<RequestBody>(body))), headers(std::move(headers))
+  async_ropen_op_body_base(
+      container::pmr::polymorphic_allocator<void> alloc,
+      RequestBody && body, http::fields headers)
+      : source_impl(requests::make_source(std::forward<RequestBody>(body), alloc.resource())), headers(std::move(headers))
   {
   }
 };
 
 
-template<typename RequestSource>
-struct connection_pool::async_ropen_op_body : async_ropen_op_body_base<RequestSource>, async_ropen_op
+struct connection_pool::async_ropen_op_body : async_ropen_op_body_base, async_ropen_op
 {
   template<typename RequestBody>
   async_ropen_op_body(
+      container::pmr::polymorphic_allocator<void> alloc,
       connection_pool * this_,
       beast::http::verb method,
       urls::url_view path,
       RequestBody && body,
-      request_settings req)
-      : async_ropen_op_body_base<RequestSource>{std::forward<RequestBody>(body), std::move(req.fields)},
-        async_ropen_op{this_, method, path.encoded_resource(), async_ropen_op_body_base<RequestSource>::headers,
-                       this->source_impl,
+                      request_parameters req)
+      : async_ropen_op_body_base{alloc, std::forward<RequestBody>(body), std::move(req.fields)},
+        async_ropen_op{this_, method, path.encoded_resource(), async_ropen_op_body_base::headers,
+                       *this->source_impl,
                        std::move(req.opts), req.jar}
   {}
 };
@@ -194,12 +194,10 @@ BOOST_ASIO_INITFN_AUTO_RESULT_TYPE(CompletionToken,
                                    void (boost::system::error_code, stream))
 connection_pool::async_ropen(beast::http::verb method,
                              urls::url_view path,
-                             RequestBody && body,
-                             request_settings req,
+                             RequestBody && body, request_parameters req,
                              CompletionToken && completion_token)
 {
-  using rp = async_ropen_op_body<std::decay_t<decltype(make_source(std::forward<RequestBody>(body)))>>;
-  return detail::faux_run<rp>(
+  return detail::faux_run_with_allocator<async_ropen_op_body>(
       std::forward<CompletionToken>(completion_token),
       this, method, path, std::forward<RequestBody>(body),
       std::move(req));
@@ -208,7 +206,6 @@ connection_pool::async_ropen(beast::http::verb method,
 }
 }
 
-#include <boost/asio/unyield.hpp>
 
 #if defined(BOOST_REQUESTS_HEADER_ONLY)
 #include <boost/requests/impl/connection_pool.ipp>

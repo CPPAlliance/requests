@@ -8,10 +8,8 @@
 #
 
 import feature ;
-import boost ; 
+import boost ;
 
-build-project example ;
-build-project test ;
 
 boost.use-project ;
 

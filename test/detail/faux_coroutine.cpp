@@ -13,7 +13,6 @@
 #include <boost/asio/writable_pipe.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/write.hpp>
-#include <boost/asio/yield.hpp>
 
 #include "../doctest.h"
 
@@ -47,7 +46,7 @@ struct my_coro : asio::coroutine
   void resume(requests::detail::faux_token_t<step_signature_type> token,
               system::error_code & ec, std::size_t n = {})
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
       if (ec_)
       {
@@ -56,13 +55,13 @@ struct my_coro : asio::coroutine
       }
       while (source.is_open())
       {
-        yield source.async_read_some(asio::buffer(buf), std::move(token));
+        BOOST_ASIO_CORO_YIELD source.async_read_some(asio::buffer(buf), std::move(token));
         if (ec && n == 0)
           break;
-        yield sink.async_write_some(asio::buffer(buf, n), std::move(token));
+        BOOST_ASIO_CORO_YIELD sink.async_write_some(asio::buffer(buf, n), std::move(token));
         if (ec)
           break;
-        yield {
+        BOOST_ASIO_CORO_YIELD {
           requests::detail::faux_token_t<void()> tt = std::move(token);
           asio::post(sink.get_executor(), std::move(tt));
         };

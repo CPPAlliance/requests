@@ -8,7 +8,7 @@
 #ifndef BOOST_REQUESTS_FIELDS_IMPL_LINK_IPP
 #define BOOST_REQUESTS_FIELDS_IMPL_LINK_IPP
 
-#include "boost/requests/grammar/alternate_rule.hpp"
+#include <boost/requests/grammar/alternate_rule.hpp>
 #include <boost/requests/fields/link.hpp>
 #include <boost/requests/grammar/raw_string.hpp>
 #include <boost/requests/grammar/token_rule.hpp>

@@ -11,7 +11,6 @@
 
 #include <boost/requests/session.hpp>
 #include <boost/requests/detail/define.hpp>
-#include <boost/asio/yield.hpp>
 
 namespace boost {
 namespace requests {
@@ -46,7 +45,6 @@ auto session::ropen(
 
   if (!is_secure && opts.enforce_tls)
   {
-    static constexpr auto loc((BOOST_CURRENT_LOCATION));
     BOOST_REQUESTS_ASSIGN_EC(ec, error::insecure);
     return stream{get_executor(), nullptr};
   }
@@ -137,9 +135,8 @@ auto session::ropen(
   return str;
 }
 
-auto session::make_request_(http::fields fields) -> requests::request_settings
-{
-  return requests::request_settings{
+auto session::make_request_(http::fields fields) -> requests::request_parameters {
+  return requests::request_parameters{
       std::move(fields),
       options_,
       &jar_
@@ -202,9 +199,9 @@ std::shared_ptr<connection_pool> session::async_get_pool_op::resume(
     requests::detail::faux_token_t<step_signature_type> self,
     error_code ec)
 {
-  reenter(this)
+  BOOST_ASIO_CORO_REENTER(this)
   {
-    await_lock(this_->mutex_, lock);
+    BOOST_REQUESTS_AWAIT_LOCK(this_->mutex_, lock);
 
     {
       auto itr = this_->pools_.find(url);
@@ -212,7 +209,7 @@ std::shared_ptr<connection_pool> session::async_get_pool_op::resume(
         return itr->second;
     }
     p = std::make_shared<connection_pool>(this_->get_executor(), this_->sslctx_);
-    yield p->async_lookup(url, std::move(self));
+    BOOST_ASIO_CORO_YIELD p->async_lookup(url, std::move(self));
     if (!ec)
     {
       this_->pools_.emplace(url, p);
@@ -226,14 +223,13 @@ auto session::async_ropen_op::resume(requests::detail::faux_token_t<step_signatu
                                      system::error_code & ec,
                                      variant2::variant<variant2::monostate, std::shared_ptr<connection_pool>, stream> s) -> stream
 {
-  reenter(this)
+  BOOST_ASIO_CORO_REENTER(this)
   {
     headers.set(beast::http::field::host, url.encoded_host_and_port());
     headers.set(beast::http::field::user_agent, "Requests-" BOOST_BEAST_VERSION_STRING);
 
     if (!is_secure && this_->options_.enforce_tls)
     {
-      static constexpr auto loc((BOOST_CURRENT_LOCATION));
       BOOST_REQUESTS_ASSIGN_EC(ec, error::insecure);
       return stream{get_executor(), nullptr};
     }
@@ -245,10 +241,10 @@ auto session::async_ropen_op::resume(requests::detail::faux_token_t<step_signatu
         headers.set(http::field::cookie, cc);
     }
 
-    yield this_->async_get_pool(url, std::move(self));
+    BOOST_ASIO_CORO_YIELD this_->async_get_pool(url, std::move(self));
     if (ec)
       return stream{get_executor(), nullptr};
-    yield variant2::get<1>(s)->async_ropen(method, url.encoded_resource(),
+    BOOST_ASIO_CORO_YIELD variant2::get<1>(s)->async_ropen(method, url.encoded_resource(),
                                            headers, src, opts, &this_->jar_, std::move(self));
 
     if (!ec || opts.max_redirects == variant2::get<2>(s).history().size())
@@ -317,10 +313,10 @@ auto session::async_ropen_op::resume(requests::detail::faux_token_t<step_signatu
       history.insert(history.end(),
                      std::make_move_iterator(std::move(variant2::get<2>(s)).history().begin()),
                      std::make_move_iterator(std::move(variant2::get<2>(s)).history().end()));
-      yield this_->async_get_pool(url, std::move(self));
+      BOOST_ASIO_CORO_YIELD this_->async_get_pool(url, std::move(self));
       if (ec)
         return stream{get_executor(), nullptr};
-      yield variant2::get<1>(s)->async_ropen(method, url.encoded_resource(), headers, src, opts, &this_->jar_, std::move(self));
+      BOOST_ASIO_CORO_YIELD variant2::get<1>(s)->async_ropen(method, url.encoded_resource(), headers, src, opts, &this_->jar_, std::move(self));
     }
     variant2::get<2>(s).prepend_history(std::move(history));
     return std::move(variant2::get<2>(s));
@@ -332,7 +328,6 @@ auto session::async_ropen_op::resume(requests::detail::faux_token_t<step_signatu
 }
 }
 
-#include <boost/asio/unyield.hpp>
 #include <boost/requests/detail/undefine.hpp>
 
 #endif // BOOST_REQUESTS_IMPL_SESSION_IPP

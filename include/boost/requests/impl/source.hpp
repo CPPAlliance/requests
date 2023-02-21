@@ -16,8 +16,6 @@ namespace boost
 {
 namespace requests
 {
-
-
 namespace detail
 {
 

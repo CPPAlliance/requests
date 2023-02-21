@@ -48,9 +48,10 @@ struct StringMaker<boost::system::error_code>
   static String convert(boost::system::error_code ec)
   {
     if (ec.has_location())
-        return toString(ec.location().to_string() + ": " + ec.message());
+        return toString(
+          ec.location().to_string() + " [" + std::to_string(ec.value()) + "/" + ec.category().name() + "]: " + ec.message());
     else
-        return toString(ec.message());
+        return toString("[" + std::to_string(ec.value()) + "/" + ec.category().name() + "]: " +  ec.message());
   }
 };
 
@@ -151,8 +152,6 @@ struct StringMaker<std::exception_ptr>
 inline void check_ec(boost::system::error_code ec,
                      boost::source_location loc = BOOST_CURRENT_LOCATION)
 {
-  if (ec.has_location())
-    loc = ec.location();
   doctest::detail::ResultBuilder rb(doctest::assertType::DT_REQUIRE, loc.file_name(), loc.line(), loc.function_name());
   rb.setResult(doctest::detail::Result{!ec, doctest::StringMaker< boost::system::error_code>::convert(ec)});
   DOCTEST_ASSERT_LOG_AND_REACT(rb);
@@ -164,6 +163,7 @@ struct tracker_t
   Handler handler;
   boost::source_location loc;
   bool called = false;
+  bool moved_from = false;
   tracker_t(
       Handler && handler,
       const boost::source_location & loc = BOOST_CURRENT_LOCATION)
@@ -178,14 +178,17 @@ struct tracker_t
 
   tracker_t(tracker_t && lhs) : handler(std::move(lhs.handler)), loc(lhs.loc), called(lhs.called)
   {
-    lhs.called = true;
+    lhs.moved_from = true;
   }
 
   ~tracker_t()
   {
-    doctest::detail::ResultBuilder rb(doctest::assertType::DT_CHECK, loc.file_name(), loc.line(), loc.function_name());
-    rb.setResult(doctest::detail::Result{called, "called"});
-    DOCTEST_ASSERT_LOG_AND_REACT(rb);
+    if (!moved_from)
+    {
+      doctest::detail::ResultBuilder rb(doctest::assertType::DT_CHECK, loc.file_name(), loc.line(), loc.function_name());
+      rb.setResult(doctest::detail::Result{called, "called"});
+      DOCTEST_ASSERT_LOG_AND_REACT(rb);
+    }
   }
 };
 
@@ -203,5 +206,9 @@ auto tracker(boost::asio::any_io_executor exec, Handler && handler,
 {
   return boost::asio::bind_executor(exec, tracker_t<std::decay_t<Handler>>(std::forward<Handler>(handler), loc));
 }
+
+#define CHECK_HTTP_RESULT(Response) \
+  CHECK_MESSAGE(boost::requests::http::to_status_class(Response.result()) == requests::http::status_class::successful, Response)
+
 
 #endif

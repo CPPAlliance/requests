@@ -36,6 +36,31 @@ std::pair<std::size_t, bool> json_source::read_some(void * data_, std::size_t si
 json_source::~json_source() = default;
 
 
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, boost::json::value value, container::pmr::memory_resource * res)
+{
+  return std::allocate_shared<json_source>(container::pmr::polymorphic_allocator<void>(res), std::move(value));
+
+}
+
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, boost::json::object   obj, container::pmr::memory_resource * res)
+{
+  return std::allocate_shared<json_source>(container::pmr::polymorphic_allocator<void>(res), std::move(obj));
+}
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, boost::json::array    arr, container::pmr::memory_resource * res)
+{
+  return std::allocate_shared<json_source>(container::pmr::polymorphic_allocator<void>(res), std::move(arr));
+}
+
+BOOST_REQUESTS_DECL
+source_ptr tag_invoke(make_source_tag, const boost::json::string & arr, container::pmr::memory_resource * res)
+{
+  return std::allocate_shared<json_source>(container::pmr::polymorphic_allocator<void>(res), std::move(arr));
+}
+
+
 }
 }
 

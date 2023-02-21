@@ -5,7 +5,7 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 
-#include <boost/requests/request_settings.hpp>
+#include <boost/requests/request_parameters.hpp>
 
 #include "doctest.h"
 

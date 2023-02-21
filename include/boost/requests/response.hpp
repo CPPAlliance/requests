@@ -27,6 +27,7 @@
 #include <memory>
 #include <scoped_allocator>
 #include <string>
+#include <type_traits>
 
 namespace boost
 {
@@ -58,10 +59,15 @@ struct response_base
   ~response_base() = default;
 
   response_base(const response_base & ) = default;
-  response_base(response_base && ) noexcept = default;
+  response_base(response_base && lhs) noexcept : headers(std::move(lhs.headers)), history(std::move(lhs.history)) {}
 
   response_base& operator=(const response_base & ) = default;
-  response_base& operator=(response_base && ) noexcept = default;
+  response_base& operator=(response_base && lhs) noexcept
+  {
+    headers = std::move(lhs.headers);
+    history = std::move(lhs.history);
+    return *this;
+  }
 
   bool ok () const
   {
@@ -136,10 +142,15 @@ struct response : response_base
   response(http::response_header header, history_type history, buffer_type buffer) : response_base(std::move(header), std::move(history)), buffer(std::move(buffer)) {}
 
   response(const response & ) = default;
-  response(response && ) noexcept = default;
+  response(response && lhs) noexcept  : response_base(std::move(lhs)), buffer(std::move(lhs.buffer)) {}
 
   response& operator=(const response & ) = default;
-  response& operator=(response && ) noexcept = default;
+  response& operator=(response && lhs) noexcept
+  {
+    response_base::operator=(std::move(lhs));
+    buffer = std::move(lhs.buffer);
+    return *this;
+  }
 
   template<typename Char = char,
            typename CharTraits = std::char_traits<char>>

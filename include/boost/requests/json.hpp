@@ -8,17 +8,18 @@
 #ifndef BOOST_REQUESTS_JSON_HPP
 #define BOOST_REQUESTS_JSON_HPP
 
-#include <boost/container/pmr/polymorphic_allocator.hpp>
-#include <boost/json.hpp>
-#include <boost/json/parser.hpp>
-#include <boost/json/value.hpp>
+
 #include <boost/requests/detail/faux_coroutine.hpp>
 #include <boost/requests/error.hpp>
 #include <boost/requests/fields/link.hpp>
 #include <boost/requests/http.hpp>
 #include <boost/requests/method.hpp>
-#include <boost/requests/request_settings.hpp>
+#include <boost/requests/request_parameters.hpp>
 #include <boost/requests/sources/json.hpp>
+#include <boost/container/pmr/polymorphic_allocator.hpp>
+#include <boost/json.hpp>
+#include <boost/json/parser.hpp>
+#include <boost/json/value.hpp>
 #include <boost/system/result.hpp>
 
 #include <boost/range.hpp>
@@ -29,7 +30,6 @@
 #include <boost/json/serialize.hpp>
 #include <boost/json/value.hpp>
 
-#include <boost/asio/yield.hpp>
 
 
 namespace boost
@@ -201,7 +201,7 @@ inline void set_accept_headers(http::fields & hd)
     hd.set(http::field::accept, "application/json");
 }
 
-inline void set_accept_headers(requests::request_settings & hd)
+inline void set_accept_headers(requests::request_parameters & hd)
 {
   set_accept_headers(hd.fields);
 }
@@ -657,11 +657,11 @@ struct async_read_json_op : asio::coroutine
   value resume(requests::detail::faux_token_t<step_signature_type> self,
                system::error_code & ec, std::size_t n = 0u)
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
-      while (!sp.done() && !str.done())
+      while (!sp.done() && !str.done() && !ec)
       {
-        yield str.async_read_some(asio::buffer(buffer), std::move(self));
+        BOOST_ASIO_CORO_YIELD str.async_read_some(asio::buffer(buffer), std::move(self));
         if (ec)
           return nullptr;
         sp.write_some(buffer, n, ec);
@@ -696,16 +696,16 @@ struct async_read_optional_json_op : asio::coroutine
   optional<value> resume(requests::detail::faux_token_t<step_signature_type> self,
                          system::error_code & ec, std::size_t n = 0u)
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
-      yield str.async_read_some(asio::buffer(buffer), std::move(self));
-      if (n == 0  && str.done())
+      BOOST_ASIO_CORO_YIELD str.async_read_some(asio::buffer(buffer), std::move(self));
+      if (ec || (n == 0  && str.done()))
         return boost::none;
       sp.write_some(buffer, n, ec);
 
       while (!sp.done() && !str.done())
       {
-        yield str.async_read_some(asio::buffer(buffer), std::move(self));
+        BOOST_ASIO_CORO_YIELD str.async_read_some(asio::buffer(buffer), std::move(self));
         if (ec)
           return boost::none;
         sp.write_some(buffer, n, ec);
@@ -797,9 +797,9 @@ struct async_request_json_op : asio::coroutine
                          system::error_code & ec,
                          variant2::variant<variant2::monostate, stream, value> s)
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
-      yield conn.async_ropen(method, target,
+      BOOST_ASIO_CORO_YIELD conn.async_ropen(method, target,
                              value_from(std::forward<RequestBody>(request_body),
                                         std::is_same<empty, std::decay_t<RequestBody>>{}),
                              std::move(req), std::move(self));
@@ -808,7 +808,9 @@ struct async_request_json_op : asio::coroutine
         str_.emplace(std::move(variant2::get<1>(s)));
         rb.headers = std::move(*str_).headers();
         rb.history = std::move(*str_).history();
-        yield async_read_json(*str_, ptr, std::move(self));
+        BOOST_ASIO_CORO_YIELD async_read_json(*str_, ptr, std::move(self));
+        if (ec)
+          return rb;
       }
       else
       {
@@ -860,9 +862,9 @@ struct async_request_optional_json_op : asio::coroutine
                           system::error_code & ec,
                           variant2::variant<variant2::monostate, stream, optional<value>> s)
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
-      yield conn.async_ropen(method, target,
+      BOOST_ASIO_CORO_YIELD conn.async_ropen(method, target,
                              ::boost::json::value_from(std::forward<RequestBody>(request_body), ptr),
                              std::move(req), std::move(self));
       if (!ec)
@@ -870,7 +872,7 @@ struct async_request_optional_json_op : asio::coroutine
         str_.emplace(std::move(variant2::get<1>(s)));
         rb.headers = std::move(*str_).headers();
         rb.history = std::move(*str_).history();
-        yield async_read_json(*str_, ptr, std::move(self));
+        BOOST_ASIO_CORO_YIELD async_read_json(*str_, ptr, std::move(self));
       }
       else
       {
@@ -1154,7 +1156,6 @@ async_options(urls::url_view target,
 }
 }
 
-#include <boost/asio/unyield.hpp>
 
 
 #endif // BOOST_REQUESTS_JSON_HPP

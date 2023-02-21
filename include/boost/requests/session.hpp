@@ -175,13 +175,11 @@ struct session
 
     struct async_ropen_op;
 
-    template<typename RequestSource>
     struct async_ropen_op_body;
 
-    template<typename RequestSource>
     struct async_ropen_op_body_base;
 
-    BOOST_REQUESTS_DECL auto make_request_(http::fields fields) -> requests::request_settings;
+    BOOST_REQUESTS_DECL auto make_request_(http::fields fields) -> requests::request_parameters;
     BOOST_REQUESTS_DECL static urls::url normalize_(urls::url_view in);
 };
 

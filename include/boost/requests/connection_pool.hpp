@@ -2,8 +2,9 @@
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
-#ifndef BOOST_REQUESTS_POOL_HPP
-#define BOOST_REQUESTS_POOL_HPP
+
+#ifndef BOOST_REQUESTS_CONNECTION_POOL_HPP
+#define BOOST_REQUESTS_CONNECTION_POOL_HPP
 
 #include <boost/requests/connection.hpp>
 
@@ -61,8 +62,7 @@ struct connection_pool
      */
     explicit connection_pool(asio::any_io_executor exec,
                              std::size_t limit = BOOST_REQUESTS_DEFAULT_POOL_SIZE)
-        : use_ssl_(false),
-          context_(
+        : context_(
               asio::use_service<detail::ssl_context_service>(
                   asio::query(exec, asio::execution::context)
               ).get()), mutex_(exec), limit_(limit) {}
@@ -73,8 +73,7 @@ struct connection_pool
                                  asio::is_convertible<ExecutionContext &, asio::execution_context &>::value,
                                  std::size_t
                              >::type limit = BOOST_REQUESTS_DEFAULT_POOL_SIZE)
-        : use_ssl_(false),
-          context_(
+        : context_(
               asio::use_service<detail::ssl_context_service>(context).get()),
               mutex_(context), limit_(limit) {}
 
@@ -88,7 +87,7 @@ struct connection_pool
     explicit connection_pool(Exec && exec,
                              asio::ssl::context & ctx,
                              std::size_t limit = BOOST_REQUESTS_DEFAULT_POOL_SIZE)
-        : use_ssl_(true), context_(ctx), mutex_(std::forward<Exec>(exec)), limit_(limit) {}
+        : context_(ctx), mutex_(std::forward<Exec>(exec)), limit_(limit) {}
 
     /// Move constructor
     connection_pool(connection_pool && ) = default;
@@ -112,10 +111,10 @@ struct connection_pool
     std::size_t limit() const {return limit_;}
     std::size_t active() const {return conns_.size();}
 
-    using request_type = request_settings;
+    using request_type = request_parameters;
 
-    BOOST_REQUESTS_DECL std::shared_ptr<connection> get_connection(error_code & ec);
-    std::shared_ptr<connection> get_connection()
+    BOOST_REQUESTS_DECL connection get_connection(error_code & ec);
+    connection get_connection()
     {
       boost::system::error_code ec;
       auto res = get_connection(ec);
@@ -124,32 +123,30 @@ struct connection_pool
       return res;
     }
 
-    template<BOOST_ASIO_COMPLETION_TOKEN_FOR(void (system::error_code, std::shared_ptr<connection>)) CompletionToken>
-    BOOST_ASIO_INITFN_AUTO_RESULT_TYPE(CompletionToken, void (system::error_code, std::shared_ptr<connection_type>))
+    template<BOOST_ASIO_COMPLETION_TOKEN_FOR(void (boost::system::error_code, connection)) CompletionToken>
+    BOOST_ASIO_INITFN_AUTO_RESULT_TYPE(CompletionToken, void (boost::system::error_code, connection))
       async_get_connection(CompletionToken && completion_token);
 
     template<typename RequestBody>
     auto ropen(beast::http::verb method,
                urls::url_view path,
-               RequestBody && body,
-               request_settings req,
+               RequestBody && body, request_parameters req,
                system::error_code & ec) -> stream
     {
       auto conn = get_connection(ec);
-      if (!ec && conn == nullptr)
+      if (!ec && !conn )
         BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found);
       if (ec)
         return stream{get_executor(), nullptr};
 
-      BOOST_ASSERT(conn != nullptr);
-      return conn->ropen(method, path, std::forward<RequestBody>(body), std::move(req), ec);
+      BOOST_ASSERT(conn);
+      return conn.ropen(method, path, std::forward<RequestBody>(body), std::move(req), ec);
     }
 
     template<typename RequestBody>
     auto ropen(beast::http::verb method,
                urls::url_view path,
-               RequestBody && body,
-               request_settings req) -> stream
+               RequestBody && body, request_parameters req) -> stream
     {
       boost::system::error_code ec;
       auto res = ropen(method, path, std::forward<RequestBody>(body), std::move(req), ec);
@@ -167,13 +164,13 @@ struct connection_pool
                system::error_code & ec) -> stream
     {
       auto conn = get_connection(ec);
-      if (!ec && conn == nullptr)
+      if (!ec && !conn)
         BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found);
       if (ec)
         return stream{get_executor(), nullptr};
 
-      BOOST_ASSERT(conn != nullptr);
-      return conn->ropen(method, path, headers, src, opt, jar, ec);
+      BOOST_ASSERT(conn);
+      return conn.ropen(method, path, headers, src, opt, jar, ec);
     }
 
     auto ropen(beast::http::verb method,
@@ -197,8 +194,7 @@ struct connection_pool
                                        void (boost::system::error_code, stream))
     async_ropen(beast::http::verb method,
                 urls::url_view path,
-                RequestBody && body,
-                request_settings req,
+                RequestBody && body, request_parameters req,
                 CompletionToken && completion_token);
 
     template<typename CompletionToken>
@@ -213,27 +209,23 @@ struct connection_pool
                 CompletionToken && completion_token);
 
     bool uses_ssl() const {return use_ssl_;}
-
   private:
-    bool use_ssl_{false};
+    bool use_ssl_{true};
     asio::ssl::context & context_;
     detail::mutex mutex_;
     std::string host_;
     std::vector<endpoint_type> endpoints_;
     std::size_t limit_;
-    std::size_t connecting_{0u};
 
     boost::unordered_multimap<endpoint_type,
-                              std::shared_ptr<connection>,
+                              std::shared_ptr<detail::connection_impl>,
                               detail::endpoint_hash> conns_;
 
     struct async_lookup_op;
     struct async_get_connection_op;
 
-    template<typename>
     struct async_ropen_op_body;
 
-    template<typename RequestSource>
     struct async_ropen_op_body_base;
 
     struct async_ropen_op;
@@ -267,8 +259,7 @@ struct connection_pool::defaulted : connection_pool
   BOOST_ASIO_INITFN_AUTO_RESULT_TYPE(CompletionToken, void (boost::system::error_code, stream))
   async_ropen(beast::http::verb method,
               urls::url_view path,
-              RequestBody && body,
-              request_settings req,
+              RequestBody && body, request_parameters req,
               CompletionToken && completion_token)
   {
     return connection_pool::async_ropen(method, path, std::forward<RequestBody>(body), std::move(req),
@@ -292,8 +283,7 @@ struct connection_pool::defaulted : connection_pool
   template<typename RequestBody>
   auto async_ropen(beast::http::verb method,
                    urls::url_view path,
-                   RequestBody && body,
-                   request_settings req)
+                   RequestBody && body, request_parameters req)
   {
     return async_ropen(method, path, std::forward<RequestBody>(body), std::move(req), default_token());
   }
@@ -314,4 +304,4 @@ struct connection_pool::defaulted : connection_pool
 
 #include <boost/requests/impl/connection_pool.hpp>
 
-#endif //BOOST_REQUESTS_POOL_HPP
+#endif //BOOST_REQUESTS_CONNECTION_POOL_HPP

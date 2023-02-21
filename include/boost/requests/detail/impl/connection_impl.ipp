@@ -8,11 +8,10 @@
 #ifndef BOOST_REQUESTS_IMPL_CONNECTION_IPP
 #define BOOST_REQUESTS_IMPL_CONNECTION_IPP
 
-#include <boost/requests/connection.hpp>
-#include <boost/beast/version.hpp>
-#include <boost/beast/http/read.hpp>
+#include <boost/requests/detail/connection_impl.hpp>
 #include <boost/requests/detail/define.hpp>
-#include <boost/asio/yield.hpp>
+#include <boost/beast/http/read.hpp>
+#include <boost/beast/version.hpp>
 
 namespace boost
 {
@@ -85,10 +84,8 @@ bool check_endpoint(
   }
 }
 
-}
 
-
-auto connection::ropen(beast::http::verb method,
+auto connection_impl::ropen(beast::http::verb method,
                        urls::pct_string_view path,
                        http::fields & headers,
                        source & src,
@@ -103,7 +100,7 @@ auto connection::ropen(beast::http::verb method,
 }
 
 
-auto connection::ropen(beast::http::verb method,
+auto connection_impl::ropen(beast::http::verb method,
                        urls::pct_string_view path,
                        http::fields & headers,
                        source & src,
@@ -143,32 +140,14 @@ auto connection::ropen(beast::http::verb method,
       lock_type wlock{write_mtx_, std::adopt_lock};
       boost::optional<lock_type> alock;
 
-      // disconnect first
-      if (!is_open() && keep_alive_set_.timeout < std::chrono::system_clock::now()) {
+      if (!is_open())
+      {
+      retry:
         read_mtx_.lock(ec);
         if (ec)
           return stream{get_executor(), nullptr};
 
         alock.emplace(read_mtx_, std::adopt_lock);
-        // if the close goes wrong - so what, unless it's still open
-        if (use_ssl_)
-          next_layer_.shutdown(ec);
-        if (!ec)
-          next_layer_.next_layer().close(ec);
-        ec.clear();
-      }
-
-      if (!is_open())
-      {
-      retry:
-        if (!alock)
-        {
-          read_mtx_.lock(ec);
-          if (ec)
-            return stream{get_executor(), nullptr};
-
-          alock.emplace(read_mtx_, std::adopt_lock);
-        }
 
         next_layer_.next_layer().connect(endpoint_, ec);
         if (use_ssl_ && !ec)
@@ -201,10 +180,10 @@ auto connection::ropen(beast::http::verb method,
     if (ec)
       return stream{get_executor(), nullptr};
 
-    stream str{get_executor(), this};
+    stream str{get_executor(), shared_from_this()};
     str.parser_ = detail::make_pmr<http::response_parser<http::buffer_body>>(headers.get_allocator().resource(),
                                                                              http::response_header{http::fields(headers.get_allocator())});
-
+    str.parser_->body_limit(boost::none);
     if (use_ssl_)
       beast::http::read_header(next_layer_, buffer_, *str.parser_, ec);
     else
@@ -232,11 +211,11 @@ auto connection::ropen(beast::http::verb method,
 
     auto rc = str.parser_->get().base().result();
 
-    if ((opt.redirect < redirect_mode::endpoint)
+    if ((opt.redirect == redirect_mode::none)
         || ((rc != http::status::moved_permanently)
-            && (rc != http::status::found)
-            && (rc != http::status::temporary_redirect)
-            && (rc != http::status::permanent_redirect)))
+         && (rc != http::status::found)
+         && (rc != http::status::temporary_redirect)
+         && (rc != http::status::permanent_redirect)))
     {
       // GO
       str.t_ = std::move(t);
@@ -258,8 +237,7 @@ auto connection::ropen(beast::http::verb method,
     auto loc_itr = res.find(http::field::location);
     if (loc_itr == res.end())
     {
-      static constexpr auto loc((BOOST_CURRENT_LOCATION));
-      ec.assign(error::invalid_redirect, &loc);
+      BOOST_REQUESTS_ASSIGN_EC(ec, error::invalid_redirect);
       break ;
     }
 
@@ -274,15 +252,13 @@ auto connection::ropen(beast::http::verb method,
         host_ == url->encoded_host() &&
         !same_endpoint_on_host(*url, endpoint()))
     {
-      static constexpr auto sloc((BOOST_CURRENT_LOCATION));
-      ec.assign(error::forbidden_redirect, &sloc);
+      BOOST_REQUESTS_ASSIGN_EC(ec, error::forbidden_redirect);
       break ;
     }
 
     if (--opt.max_redirects == 0)
     {
-      static constexpr auto sloc((BOOST_CURRENT_LOCATION));
-      ec.assign(error::too_many_redirects, &sloc);
+      BOOST_REQUESTS_ASSIGN_EC(ec, error::too_many_redirects);
       break ;
     }
 
@@ -303,28 +279,28 @@ auto connection::ropen(beast::http::verb method,
     read_lock = {};
   }
 
-  stream str{get_executor(), this};
+  stream str{get_executor(), shared_from_this()};
   str.history_ = std::move(history);
   return str;
 }
 
 
-void connection::set_host(core::string_view sv, system::error_code & ec)
+void connection_impl::set_host(core::string_view sv, system::error_code & ec)
 {
   next_layer_.set_verify_callback(asio::ssl::host_name_verification(host_ = sv), ec);
 }
 
 
 BOOST_REQUESTS_DECL
-auto connection::async_ropen_op::resume(
+auto connection_impl::async_ropen_op::resume(
             requests::detail::faux_token_t<step_signature_type> self,
             system::error_code & ec, std::size_t res_) -> stream
 {
-  reenter(this)
+  BOOST_ASIO_CORO_REENTER(this)
   {
     if (ec_)
     {
-      yield asio::post(this_->get_executor(), std::move(self));
+      BOOST_ASIO_CORO_YIELD asio::post(this_->get_executor(), std::move(self));
       ec = ec_;
     }
 
@@ -347,33 +323,16 @@ auto connection::async_ropen_op::resume(
 
     while (!ec)
     {
-      await_lock(this_->write_mtx_, lock);
-
-      // disconnect first
-      if (!this_->is_open() && this_->keep_alive_set_.timeout < std::chrono::system_clock::now())
-      {
-        await_lock(this_->read_mtx_, alock);
-        // if the close goes wrong - so what, unless it's still open
-        if (!ec && this_->use_ssl_)
-        {
-          yield this_->next_layer_.async_shutdown(std::move(self));
-        }
-        if (!ec)
-          this_->next_layer_.next_layer().close(ec);
-        ec.clear();
-      }
+      BOOST_REQUESTS_AWAIT_LOCK(this_->write_mtx_, lock);
 
       if (!this_->is_open())
       {
       retry:
-        if (!alock)
-        {
-          await_lock(this_->read_mtx_, alock);
-        }
-        yield this_->next_layer_.next_layer().async_connect(this_->endpoint_, std::move(self));
+        BOOST_REQUESTS_AWAIT_LOCK(this_->read_mtx_, alock);
+        BOOST_ASIO_CORO_YIELD this_->next_layer_.next_layer().async_connect(this_->endpoint_, std::move(self));
         if (!ec && this_->use_ssl_)
         {
-          yield this_->next_layer_.async_handshake(asio::ssl::stream_base::client, std::move(self));
+          BOOST_ASIO_CORO_YIELD this_->next_layer_.async_handshake(asio::ssl::stream_base::client, std::move(self));
         }
         if (ec)
           break;
@@ -382,11 +341,11 @@ auto connection::async_ropen_op::resume(
       alock.reset();
       if (this_->use_ssl_)
       {
-        yield async_write_request(this_->next_layer_, method, path, headers, src, std::move(self));
+        BOOST_ASIO_CORO_YIELD async_write_request(this_->next_layer_, method, path, headers, src, std::move(self));
       }
       else
       {
-        yield async_write_request(this_->next_layer_.next_layer(), method, path, headers, src, std::move(self));
+        BOOST_ASIO_CORO_YIELD async_write_request(this_->next_layer_.next_layer(), method, path, headers, src, std::move(self));
       }
 
       if (ec == asio::error::broken_pipe || ec == asio::error::connection_reset)
@@ -395,20 +354,20 @@ auto connection::async_ropen_op::resume(
         break;
 
       // release after acquire!
-      await_lock(this_->read_mtx_, lock);
+      BOOST_REQUESTS_AWAIT_LOCK(this_->read_mtx_, lock);
       // END OF write impl
 
       str.emplace(this_->get_executor(), this_); // , req.get_allocator().resource()
       str->parser_ = detail::make_pmr<http::response_parser<http::buffer_body>>(headers.get_allocator().resource(),
                                                                                 http::response_header{http::fields(headers.get_allocator())});
-
+      str->parser_->body_limit(boost::none);
       if (this_->use_ssl_)
       {
-        yield beast::http::async_read_header(this_->next_layer_, this_->buffer_, *str->parser_, std::move(self));
+        BOOST_ASIO_CORO_YIELD beast::http::async_read_header(this_->next_layer_, this_->buffer_, *str->parser_, std::move(self));
       }
       else
       {
-        yield beast::http::async_read_header(this_->next_layer_.next_layer(), this_->buffer_, *str->parser_, std::move(self));
+        BOOST_ASIO_CORO_YIELD beast::http::async_read_header(this_->next_layer_.next_layer(), this_->buffer_, *str->parser_, std::move(self));
       }
 
       if (ec)
@@ -446,7 +405,7 @@ auto connection::async_ropen_op::resume(
 
       if (method != http::verb::head)
       {
-        yield str->async_read(buf, std::move(self));
+        BOOST_ASIO_CORO_YIELD str->async_read(buf, std::move(self));
       }
       if (ec)
         break;
@@ -500,7 +459,7 @@ auto connection::async_ropen_op::resume(
 
     }
 
-    stream str_{this_->get_executor(), this_};
+    stream str_{this_->get_executor(), nullptr};
     str_.history_ = std::move(history);
     return str_;
 
@@ -510,7 +469,7 @@ auto connection::async_ropen_op::resume(
 }
 
 
-void connection::connect(endpoint_type ep, system::error_code & ec)
+void connection_impl::connect(endpoint_type ep, system::error_code & ec)
 {
   auto wlock = detail::lock(write_mtx_, ec);
   if (ec)
@@ -527,7 +486,7 @@ void connection::connect(endpoint_type ep, system::error_code & ec)
 }
 
 
-void connection::close(system::error_code & ec)
+void connection_impl::close(system::error_code & ec)
 {
   auto wlock = detail::lock(write_mtx_, ec);
   if (ec)
@@ -545,7 +504,7 @@ void connection::close(system::error_code & ec)
 }
 
 
-std::size_t connection::do_read_some_(beast::http::basic_parser<false> & parser)
+std::size_t connection_impl::do_read_some_(beast::http::basic_parser<false> & parser)
 {
   if (use_ssl_)
     return beast::http::read_some(next_layer_, buffer_, parser);
@@ -553,7 +512,7 @@ std::size_t connection::do_read_some_(beast::http::basic_parser<false> & parser)
     return beast::http::read_some(next_layer_.next_layer(), buffer_, parser);
 }
 
-std::size_t connection::do_read_some_(beast::http::basic_parser<false> & parser, system::error_code & ec)
+std::size_t connection_impl::do_read_some_(beast::http::basic_parser<false> & parser, system::error_code & ec)
 {
   if (use_ssl_)
     return beast::http::read_some(next_layer_, buffer_, parser, ec);
@@ -561,7 +520,7 @@ std::size_t connection::do_read_some_(beast::http::basic_parser<false> & parser,
     return beast::http::read_some(next_layer_.next_layer(), buffer_, parser, ec);
 }
 
-void connection::do_async_read_some_(beast::http::basic_parser<false> & parser, detail::faux_token_t<void(system::error_code, std::size_t)> tk)
+void connection_impl::do_async_read_some_(beast::http::basic_parser<false> & parser, detail::faux_token_t<void(system::error_code, std::size_t)> tk)
 {
   if (use_ssl_)
     beast::http::async_read_some(next_layer_, buffer_, parser, std::move(tk));
@@ -569,36 +528,36 @@ void connection::do_async_read_some_(beast::http::basic_parser<false> & parser, 
     beast::http::async_read_some(next_layer_.next_layer(), buffer_, parser, std::move(tk));
 }
 
-void connection::do_async_close_(detail::faux_token_t<void(system::error_code)> tk)
+void connection_impl::do_async_close_(detail::faux_token_t<void(system::error_code)> tk)
 {
   async_close(std::move(tk));
 }
 
-void connection::async_connect_op::resume(requests::detail::faux_token_t<step_signature_type> self,
+void connection_impl::async_connect_op::resume(requests::detail::faux_token_t<step_signature_type> self,
                                           system::error_code & ec)
 {
-  reenter(this)
+  BOOST_ASIO_CORO_REENTER(this)
   {
-    await_lock(this_->write_mtx_, write_lock);
-    await_lock(this_->read_mtx_,  read_lock);
-    yield this_->next_layer_.next_layer().async_connect(this_->endpoint_ = ep, std::move(self));
+    BOOST_REQUESTS_AWAIT_LOCK(this_->write_mtx_, write_lock);
+    BOOST_REQUESTS_AWAIT_LOCK(this_->read_mtx_,  read_lock);
+    BOOST_ASIO_CORO_YIELD this_->next_layer_.next_layer().async_connect(this_->endpoint_ = ep, std::move(self));
     if (!ec && this_->use_ssl_)
     {
-      yield this_->next_layer_.async_handshake(asio::ssl::stream_base::client, std::move(self));
+      BOOST_ASIO_CORO_YIELD this_->next_layer_.async_handshake(asio::ssl::stream_base::client, std::move(self));
     }
   }
 }
 
-void connection::async_close_op::resume(requests::detail::faux_token_t<step_signature_type> self,
+void connection_impl::async_close_op::resume(requests::detail::faux_token_t<step_signature_type> self,
                                           system::error_code & ec)
 {
-  reenter(this)
+  BOOST_ASIO_CORO_REENTER(this)
   {
-    await_lock(this_->write_mtx_, write_lock);
-    await_lock(this_->read_mtx_,  read_lock);
+    BOOST_REQUESTS_AWAIT_LOCK(this_->write_mtx_, write_lock);
+    BOOST_REQUESTS_AWAIT_LOCK(this_->read_mtx_,  read_lock);
     if (!ec && this_->use_ssl_)
     {
-      yield this_->next_layer_.async_shutdown(std::move(self));
+      BOOST_ASIO_CORO_YIELD this_->next_layer_.async_shutdown(std::move(self));
     }
     if (this_->next_layer_.next_layer().is_open())
       this_->next_layer_.next_layer().close(ec);
@@ -606,7 +565,7 @@ void connection::async_close_op::resume(requests::detail::faux_token_t<step_sign
 }
 
 
-void connection::do_close_(system::error_code & ec)
+void connection_impl::do_close_(system::error_code & ec)
 {
   auto wlock = detail::lock(write_mtx_, ec);
   if (ec)
@@ -621,8 +580,8 @@ void connection::do_close_(system::error_code & ec)
 
 }
 }
+}
 
 #include <boost/requests/detail/undefine.hpp>
-#include <boost/asio/unyield.hpp>
 
 #endif // BOOST_REQUESTS_REQUESTS_CONNECTION_IPP

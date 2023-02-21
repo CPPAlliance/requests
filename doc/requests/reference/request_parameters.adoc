@@ -1,5 +1,5 @@
-## request_settings.hpp
-[#reference::request_settings]
+## request_parameters.hpp
+[#reference::request_parameters]
 
 
 [source,cpp]
@@ -27,7 +27,7 @@ auto headers(std::initializer_list<field_entry> fields,
             boost::container::pmr::memory_resource * res = boost::container::pmr::get_default_resource());
 
 // The full request settings used in the connection.
-struct request_settings
+struct request_parameters
 {
   using allocator_type = boost::container::pmr::polymorphic_allocator<char>;
   allocator_type get_allocator() const {return fields.get_allocator();}

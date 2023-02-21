@@ -9,7 +9,6 @@
 #define BOOST_REQUESTS_IMPL_CONNECTION_POOL_IPP
 
 #include <boost/requests/connection_pool.hpp>
-#include <boost/asio/yield.hpp>
 
 namespace boost {
 namespace requests {
@@ -17,7 +16,7 @@ namespace requests {
 
 void connection_pool::lookup(urls::url_view sv, system::error_code & ec)
 {
-  urls::string_view scheme = use_ssl_ ? "https" : "http";
+  urls::string_view scheme = "https";
   if (sv.has_scheme())
     scheme = sv.scheme();
 
@@ -34,7 +33,7 @@ void connection_pool::lookup(urls::url_view sv, system::error_code & ec)
     use_ssl_ = false;
     host_ = "localhost";
     endpoints_ = {asio::local::stream_protocol::endpoint(
-                        asio::string_view(
+                        std::string(
                           sv.encoded_target().data(),
                           sv.encoded_target().size()
                         ))};
@@ -44,8 +43,8 @@ void connection_pool::lookup(urls::url_view sv, system::error_code & ec)
     asio::ip::tcp::resolver resolver{get_executor()};
     const auto service = sv.has_port() ? sv.port() : scheme;
     auto eps = resolver.resolve(
-        asio::string_view(sv.encoded_host_name().data(), sv.encoded_host_name().size()),
-        asio::string_view(service.data(), service.size()), ec);
+        std::string(sv.encoded_host_name().data(), sv.encoded_host_name().size()),
+        std::string(service.data(), service.size()), ec);
 
     if (!ec && eps.empty())
       BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found)
@@ -89,7 +88,7 @@ void connection_pool::lookup(urls::url_view sv, system::error_code & ec)
 void connection_pool::async_lookup_op::resume(requests::detail::faux_token_t<step_signature_type> self,
                                               system::error_code & ec, typename asio::ip::tcp::resolver::results_type eps)
 {
-  reenter(this)
+  BOOST_ASIO_CORO_REENTER(this)
   {
     if (sv.has_scheme())
       scheme = sv.scheme();
@@ -100,7 +99,7 @@ void connection_pool::async_lookup_op::resume(requests::detail::faux_token_t<ste
 
       if (!this_->mutex_.try_lock())
       {
-        yield this_->mutex_.async_lock(std::move(self));
+        BOOST_ASIO_CORO_YIELD this_->mutex_.async_lock(std::move(self));
       }
       if (ec)
         return;
@@ -109,24 +108,24 @@ void connection_pool::async_lookup_op::resume(requests::detail::faux_token_t<ste
       this_->use_ssl_ = false;
       this_->host_ = "localhost";
       this_->endpoints_ = {asio::local::stream_protocol::endpoint(
-          asio::string_view(sv.encoded_target().data(), sv.encoded_target().size()))};
+          std::string(sv.encoded_target().data(), sv.encoded_target().size()))};
     }
     else if (scheme == "http" || scheme == "https")
     {
       resolver.emplace(get_executor());
       service = sv.has_port() ? sv.port() : scheme;
-      yield resolver->async_resolve(
-          asio::string_view(sv.encoded_host_name().data(), sv.encoded_host_name().size()),
-          asio::string_view(service.data(), service.size()), std::move(self));
+      BOOST_ASIO_CORO_YIELD resolver->async_resolve(
+          std::string(sv.encoded_host_name().data(), sv.encoded_host_name().size()),
+          std::string(service.data(), service.size()), std::move(self));
 
       if (!ec && eps.empty())
-      BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found)
+        BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found)
       if (ec)
         return;
 
       if (!this_->mutex_.try_lock())
       {
-        yield this_->mutex_.async_lock(std::move(self));
+        BOOST_ASIO_CORO_YIELD this_->mutex_.async_lock(std::move(self));
       }
       if (ec)
         return;
@@ -162,22 +161,22 @@ void connection_pool::async_lookup_op::resume(requests::detail::faux_token_t<ste
 }
 
 
-auto connection_pool::get_connection(error_code & ec) -> std::shared_ptr<connection>
+auto connection_pool::get_connection(error_code & ec) -> connection
 {
 
   auto lock = detail::lock(mutex_, ec);
   if (ec)
-    return nullptr;
+    return connection();
 
   // find an idle connection
   auto itr = std::find_if(conns_.begin(), conns_.end(),
-                          [](const std::pair<const endpoint_type, std::shared_ptr<connection>> & conn)
+                          [](const std::pair<const endpoint_type, std::shared_ptr<detail::connection_impl>> & conn)
                           {
-                            return conn.second->working_requests() == 0u;
+                            return (conn.second->working_requests() == 0u) && conn.second->is_open();
                           });
 
   if (itr != conns_.end())
-    return itr->second;
+    return connection(itr->second);
 
   // check if we can make more connections. -> open another connection.
   // the race here is that we might open one too many
@@ -186,7 +185,7 @@ auto connection_pool::get_connection(error_code & ec) -> std::shared_ptr<connect
     if (endpoints_.empty())
     {
       BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found);
-      return nullptr;
+      return connection();
     }
 
     //sort the endpoints by connections that use it
@@ -197,64 +196,63 @@ auto connection_pool::get_connection(error_code & ec) -> std::shared_ptr<connect
               });
     const auto ep = endpoints_.front();
 
-    std::shared_ptr<connection> nconn =
-        use_ssl_ ? std::make_shared<connection>(get_executor(), context_)
-                 : std::make_shared<connection>(get_executor());
+    std::shared_ptr<detail::connection_impl> nconn = std::make_shared<detail::connection_impl>(get_executor(), context_);
+    nconn->use_ssl(use_ssl_);
     nconn->set_host(host_);
     nconn->connect(ep, ec);
     if (ec)
-      return nullptr;
+      return connection();
 
     if (ec)
-      return nullptr;
+      return connection();
 
     conns_.emplace(ep, nconn);
-    return nconn;
+    return connection(nconn);
 
   }
 
   // find the one with the lowest usage
   itr = std::min_element(conns_.begin(), conns_.end(),
-                         [](const std::pair<const endpoint_type, std::shared_ptr<connection>> & lhs,
-                            const std::pair<const endpoint_type, std::shared_ptr<connection>> & rhs)
+                         [](const std::pair<const endpoint_type, std::shared_ptr<detail::connection_impl>> & lhs,
+                            const std::pair<const endpoint_type, std::shared_ptr<detail::connection_impl>> & rhs)
                          {
                            return (lhs.second->working_requests() + (lhs.second->is_open() ? 0 : 1))
-                                  < (rhs.second->working_requests() + (rhs.second->is_open() ? 0 : 1));
+                                < (rhs.second->working_requests() + (rhs.second->is_open() ? 0 : 1));
                          });
   if (itr == conns_.end())
   {
     BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found);
-    return nullptr;
+    return connection();
   }
   else
-    return itr->second;
+    return connection(itr->second);
 }
 
 
 auto connection_pool::async_get_connection_op::resume(
             requests::detail::faux_token_t<step_signature_type> self,
-            system::error_code & ec) -> std::shared_ptr<connection>
+            system::error_code & ec) -> connection
 {
-  reenter (this)
+  BOOST_ASIO_CORO_REENTER (this)
   {
     if (!this_->mutex_.try_lock())
     {
-      yield this_->mutex_.async_lock(std::move(self));
+      BOOST_ASIO_CORO_YIELD this_->mutex_.async_lock(std::move(self));
     }
     if (ec)
-      return nullptr;
+      return connection();
 
     lock = {this_->mutex_, std::adopt_lock};
 
     // find an idle connection
     itr = std::find_if(this_->conns_.begin(), this_->conns_.end(),
-                       [](const std::pair<const endpoint_type, std::shared_ptr<connection>> & conn)
+                       [](const std::pair<const endpoint_type, std::shared_ptr<detail::connection_impl>> & conn)
                        {
-                         return conn.second->working_requests() == 0u;
+                         return (conn.second->working_requests() == 0u) && conn.second->is_open();;
                        });
 
     if (itr != this_->conns_.end())
-      return itr->second;
+      return connection(itr->second);
 
     // check if we can make more connections. -> open another connection.
     // the race here is that we might open one too many
@@ -263,7 +261,7 @@ auto connection_pool::async_get_connection_op::resume(
       if (this_->endpoints_.empty())
       {
         BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found);
-        return nullptr;
+        return connection();
       }
 
       //sort the endpoints by connections that use it
@@ -273,20 +271,20 @@ auto connection_pool::async_get_connection_op::resume(
                   return this_->conns_.count(a) < this_->conns_.count(b);
                 });
       ep = this_->endpoints_.front();
-      nconn = this_->use_ssl_ ? std::make_shared<connection>(get_executor(), this_->context_)
-                              : std::make_shared<connection>(get_executor());
+      nconn = std::make_shared<detail::connection_impl>(get_executor(), this_->context_);
+      nconn->use_ssl(this_->use_ssl_);
       nconn->set_host(this_->host_);
-      yield nconn->async_connect(ep, std::move(self)); // don't unlock here.
+      BOOST_ASIO_CORO_YIELD nconn->async_connect(ep, std::move(self)); // don't unlock here.
       if (ec)
-        return nullptr;
+        return connection();
 
       this_->conns_.emplace(ep, nconn);
-      return std::move(nconn);
+      return connection(std::move(nconn));
     }
     // find the one with the lowest usage
     itr = std::min_element(this_->conns_.begin(), this_->conns_.end(),
-                           [](const std::pair<const endpoint_type, std::shared_ptr<connection>> & lhs,
-                              const std::pair<const endpoint_type, std::shared_ptr<connection>> & rhs)
+                           [](const std::pair<const endpoint_type, std::shared_ptr<detail::connection_impl>> & lhs,
+                              const std::pair<const endpoint_type, std::shared_ptr<detail::connection_impl>> & rhs)
                            {
                              return (lhs.second->working_requests() + (lhs.second->is_open() ? 0 : 1))
                                   < (rhs.second->working_requests() + (rhs.second->is_open() ? 0 : 1));
@@ -294,29 +292,29 @@ auto connection_pool::async_get_connection_op::resume(
     if (itr == this_->conns_.end())
     {
       BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found);
-      return nullptr;
+      return connection();
     }
     else
-      return itr->second;
+      return connection(itr->second);
   }
-  return nullptr;
+  return connection();
 }
 
 stream connection_pool::async_ropen_op::resume(
     requests::detail::faux_token_t<step_signature_type> self,
-    system::error_code & ec,
-    variant2::variant<variant2::monostate, std::shared_ptr<connection>, stream> res)
+    boost::system::error_code & ec,
+    variant2::variant<variant2::monostate, connection, stream> res)
 {
-  reenter(this)
+  BOOST_ASIO_CORO_REENTER(this)
   {
-    yield this_->async_get_connection(std::move(self));
-    conn = variant2::get<1>(res);
-    if (!ec && conn == nullptr)
-      ec =  asio::error::not_found;
+    BOOST_ASIO_CORO_YIELD this_->async_get_connection(std::move(self));
+    conn = std::move(variant2::get<1>(res));
+    if (!ec && !conn)
+      BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_found);
     if (ec)
       return stream{this_->get_executor(), nullptr};
 
-    yield conn->async_ropen(method, path, headers, src, std::move(opt), jar, std::move(self));
+    BOOST_ASIO_CORO_YIELD conn.async_ropen(method, path, headers, src, std::move(opt), jar, std::move(self));
     return variant2::get<2>(std::move(res));
   }
   return stream{get_executor(), nullptr};
@@ -325,6 +323,5 @@ stream connection_pool::async_ropen_op::resume(
 }
 }
 
-#include <boost/asio/unyield.hpp>
 
 #endif // BOOST_REQUESTS_IMPL_CONNECTION_POOL_IPP

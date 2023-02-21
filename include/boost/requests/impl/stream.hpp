@@ -10,11 +10,8 @@
 
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/redirect_error.hpp>
-#include <boost/beast/core/buffer_ref.hpp>
-#include <boost/requests/keep_alive.hpp>
 #include <boost/requests/stream.hpp>
 
-#include <boost/asio/yield.hpp>
 
 namespace boost
 {
@@ -55,8 +52,7 @@ std::size_t stream::read_some(const MutableBuffer & buffer, system::error_code &
   else
   {
     parser_->get().body().more = false;
-    bool should_close = interpret_keep_alive_response(impl_->keep_alive_set_, parser_->get(), ec);
-    if (should_close)
+    if (!parser_->get().keep_alive())
     {
       boost::system::error_code ec_;
       impl_->do_close_(ec_);
@@ -95,8 +91,7 @@ std::size_t stream::read(DynamicBuffer & buffer, system::error_code & ec)
   else
   {
     parser_->get().body().more = false;
-    bool should_close = interpret_keep_alive_response(impl_->keep_alive_set_, parser_->get(), ec);
-    if (should_close)
+    if (!parser_->get().keep_alive())
     {
       boost::system::error_code ec_;
       impl_->do_close_(ec_);
@@ -132,7 +127,7 @@ struct stream::async_read_op : asio::coroutine
   std::size_t resume(requests::detail::faux_token_t<step_signature_type> self,
                      system::error_code & ec, std::size_t n = 0u)
   {
-    reenter(this)
+    BOOST_ASIO_CORO_REENTER(this)
     {
       if (!this_->parser_)
         BOOST_REQUESTS_ASSIGN_EC(ec, asio::error::not_connected)
@@ -147,7 +142,7 @@ struct stream::async_read_op : asio::coroutine
 
       while (!ec && !this_->parser_->is_done())
       {
-        yield this_->async_read_some(
+        BOOST_ASIO_CORO_YIELD this_->async_read_some(
             buffer.prepare(this_->parser_->content_length_remaining().value_or(BOOST_REQUESTS_CHUNK_SIZE)),
             std::move(self));
         buffer.commit(n);
@@ -162,10 +157,10 @@ struct stream::async_read_op : asio::coroutine
       else
       {
         this_->parser_->get().body().more = false;
-        if (interpret_keep_alive_response(this_->impl_->keep_alive_set_, this_->parser_->get(), ec))
+        if (this_->parser_->get().keep_alive())
         {
           std::swap(ec, ec_);
-          yield this_->impl_->do_async_close_(std::move(self));
+          BOOST_ASIO_CORO_YIELD this_->impl_->do_async_close_(std::move(self));
           std::swap(ec, ec_);
         }
       }
@@ -268,7 +263,6 @@ stream::async_dump(CompletionToken && token)
 }
 }
 
-#include <boost/asio/unyield.hpp>
 
 #if defined(BOOST_REQUESTS_HEADER_ONLY)
 #include <boost/requests/impl/stream.ipp>

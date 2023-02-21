@@ -110,8 +110,6 @@ TEST_CASE("domain")
 
 TEST_CASE("set-cookie")
 {
-    constexpr auto & rule = requests::grammar::domain;
-
     auto v1 = requests::parse_set_cookie_field("theme=light");
     CHECK(v1);
     CHECK(v1->name == "theme");

@@ -24,6 +24,20 @@ common_install () {
 
   if [ "$TRAVIS_OS_NAME" == "osx" ]; then
       unset -f cd
+      echo "macos - set up homebrew openssl"
+      export OPENSSL_ROOT=/usr/local/opt/openssl
+
+      cat > ~/user-config.jam <<EOF
+import os ;
+local OPENSSL_ROOT = [ os.environ OPENSSL_ROOT ] ;
+project
+  : requirements
+    <include>/usr/local/opt/openssl/include
+    <variant>debug:<library-path>/usr/local/opt/openssl/lib
+    <target-os>windows<variant>debug:<library-path>/usr/local/opt/openssl/debug/lib
+    <variant>release:<library-path>/usr/local/opt/openssl/lib
+  ;
+EOF
   fi
 
   export SELF=`basename $REPO_NAME`
@@ -77,9 +91,12 @@ python tools/boostdep/depinst/depinst.py ../tools/quickbook
 ./bootstrap.sh
 ./b2 headers
 
+cp libs/requests/tools/user-config.jam ~/user-config.jam
+echo "using $TOOLSET : : $COMPILER : $CXX_FLAGS ;" >> ~/user-config.jam
+
 echo '==================================> SCRIPT'
 
-echo "using doxygen ; using boostbook ; using saxonhe ;" > tools/build/src/user-config.jam
+echo "using doxygen ; using boostbook ; using saxonhe ;" >> tools/build/src/user-config.jam
 ./b2 -j3 libs/$SELF/doc//boostrelease
 
 elif [ "$DRONE_JOB_BUILDTYPE" == "codecov" ]; then

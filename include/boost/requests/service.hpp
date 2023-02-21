@@ -15,6 +15,8 @@ namespace boost
 namespace requests
 {
 
+namespace detail
+{
 
 struct session_service : asio::detail::execution_context_service_base<session_service>
 {
@@ -44,10 +46,12 @@ struct session_service : asio::detail::execution_context_service_base<session_se
   boost::optional<session> session_;
 };
 
+}
+
 
 inline auto default_session(asio::any_io_executor exec = asio::system_executor()) -> session &
 {
-  auto & so = asio::use_service<session_service>(exec.context()).session_;
+  auto & so = asio::use_service<detail::session_service>(exec.context()).session_;
   if (!so)
     so.emplace(exec);
   return *so;

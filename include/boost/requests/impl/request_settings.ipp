@@ -11,7 +11,7 @@
 
 #if defined(BOOST_REQUESTS_SOURCE)
 
-#include <boost/requests/request_settings.hpp>
+#include <boost/requests/request_parameters.hpp>
 
 namespace boost {
 namespace requests {

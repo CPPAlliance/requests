@@ -11,13 +11,16 @@ project :
 requirements <include>../../.. 
     <cxxstd>17:<boost.requests.use-std-fs>on
     <cxxstd>20:<boost.requests.use-std-fs>on
-    <boost.requests.separate-compilation>on:<source>/boost//requests 
+    <boost.requests.separate-compilation>on:<source>/boost//requests
     <boost.requests.use-std-fs>off:<source>/boost//filesystem
 ;
+
+import testing ;
 
 
 alias asio     : ../../beast//lib-asio ;
 alias asio-ssl : ../../beast//lib-asio-ssl ;
 alias beast    : ../../beast//lib-beast ;
+alias ssl      : ../../beast//ssl ;
 
-run [ glob-tree *.cpp ] /boost//json /boost//url asio asio-ssl beast ;
+run [ glob-tree *.cpp ] /boost//json /boost//url ssl asio asio-ssl beast /openssl//ssl ;

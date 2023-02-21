@@ -2,8 +2,8 @@
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
-#ifndef BOOST_REQUESTS_REQUEST_SETTINGS_HPP
-#define BOOST_REQUESTS_REQUEST_SETTINGS_HPP
+#ifndef BOOST_REQUESTS_REQUEST_PARAMETERS_HPP
+#define BOOST_REQUESTS_REQUEST_PARAMETERS_HPP
 
 #include <boost/beast/core/detail/base64.hpp>
 #include <boost/requests/cookie_jar.hpp>
@@ -69,8 +69,7 @@ inline auto headers(std::initializer_list<field_entry> fields,
 }
 
 
-struct request_settings
-{
+struct request_parameters {
   //Allocator
   using allocator_type = boost::container::pmr::polymorphic_allocator<char>;
   allocator_type get_allocator() const {return fields.get_allocator();}
@@ -83,4 +82,4 @@ struct request_settings
 }
 }
 
-#endif // BOOST_REQUESTS_REQUEST_SETTINGS_HPP
+#endif // BOOST_REQUESTS_REQUEST_PARAMETERS_HPP

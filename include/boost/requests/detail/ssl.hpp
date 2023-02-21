@@ -34,7 +34,7 @@ struct ssl_context_service : asio::detail::execution_context_service_base<ssl_co
   }
 
 
-  asio::ssl::context context{asio::ssl::context_base::tlsv12_client};
+  asio::ssl::context context{asio::ssl::context_base::tlsv13_client};
 
   asio::ssl::context & get() {return context;}
 

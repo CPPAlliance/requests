@@ -7,8 +7,6 @@
 
 #include "github-issues.hpp"
 
-#include <boost/program_options.hpp>
-
 #include <iostream>
 
 // printing functions

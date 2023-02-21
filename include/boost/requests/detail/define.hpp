@@ -5,15 +5,15 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 
-#define await(coro) \
+#define BOOST_REQUESTS_AWAIT(coro) \
   coro = {}; \
   while (!coro.is_complete()) \
-    yield
+    BOOST_ASIO_CORO_YIELD
 
-#define await_lock(Mutex, Lock) \
+#define BOOST_REQUESTS_AWAIT_LOCK(Mutex, Lock) \
   if (!Mutex.try_lock())   \
   {                       \
-    yield Mutex.async_lock(std::move(self)); \
+    BOOST_ASIO_CORO_YIELD Mutex.async_lock(std::move(self)); \
     if (ec)               \
        break;             \
   }                       \
